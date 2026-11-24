@@ -74,6 +74,29 @@ if [[ -f /etc/lvm/devices/system.devices ]]; then
     /etc/lvm/devices/system.devices
 fi
 
+# The Java trust store records when each certificate was added. Extract it
+# again with those times set to the same build time.
+SOURCE_DATE_EPOCH="${newest_build}" update-ca-trust extract
+
+# Boot entries are named after the build VM's machine ID, which differs on
+# every build (and which the truncate above already discarded). Rename them
+# to a fixed ID, the same for every build of this release. A clone's own
+# machine ID names the entries of kernels it installs later.
+. /etc/os-release
+token=$(printf '%s' "${ID}-${VERSION_ID%%.*}-boot-entry" | sha256sum | cut -c1-32)
+for entry in /boot/loader/entries/*.conf; do
+  name=${entry##*/}
+  if [[ "${name}" =~ ^[0-9a-f]{32}-(.+)$ ]]; then
+    mv "${entry}" "/boot/loader/entries/${token}-${BASH_REMATCH[1]}"
+  fi
+done
+saved=$(grub2-editenv - list | sed -n 's/^saved_entry=//p')
+if [[ "${saved}" =~ ^[0-9a-f]{32}-(.+)$ ]]; then
+  grub2-editenv - set "saved_entry=${token}-${BASH_REMATCH[1]}"
+fi
+grub2-editenv - list
+ls /boot/loader/entries
+
 # Hand freed blocks back to the disk image (disk_discard / disk_detect_zeroes =
 # unmap), which also drops most of the files deleted above from the published
 # image. A failed trim fails the build.
