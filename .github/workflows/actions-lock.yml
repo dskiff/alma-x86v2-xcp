@@ -1,0 +1,51 @@
+name: Actions lockfile
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+  # A run fails at startup if a locked commit is no longer on its tag, e.g.
+  # after upstream re-points the tag. The weekly run catches that before a
+  # release does.
+  schedule:
+    - cron: "41 7 * * 1"
+  workflow_dispatch:
+
+# Deny everything by default; jobs opt in to what they need.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out this private repo
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      # Renovate bumps the pinned version.
+      - name: Install gh-actions-lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh extension install github/gh-actions-lock --pin v0.5.1
+
+      # Fails if a workflow's `uses:` (or what those actions use in turn) has
+      # no entry in actions.lock, or a locked commit no longer checks out
+      # upstream. Fix by running `gh actions-lock` locally, not by editing
+      # the lockfile.
+      - name: gh actions-lock --verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh actions-lock --verify

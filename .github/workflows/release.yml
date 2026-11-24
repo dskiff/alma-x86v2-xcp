@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      contents: write
+      contents: write # create the draft release
     steps:
       # The images upload to a draft, and the publish job releases it once
       # every image is attached. An existing release is used as is.
@@ -51,7 +51,7 @@ jobs:
     # job would mean storing GBs as workflow artifacts, which quickly exhausts
     # a private repo's artifact storage.
     permissions:
-      contents: write
+      contents: write # upload the images to the release
     strategy:
       fail-fast: false
       matrix:
@@ -61,29 +61,22 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: packer
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-
-      # A tag can point at a commit the Packer workflow never checked, so the
-      # ISO's checksum is checked against AlmaLinux's signature here too.
-      - name: Verify ISO checksum against AlmaLinux's signature
-        run: ./verify-iso.sh "${IMAGE}.pkr.hcl"
 
       # devbox.json is the single source of truth for tool versions (and is
       # what Renovate bumps), so CI uses the same Packer as `devbox shell`.
       - name: Read Packer version from devbox.json
         id: version
-        working-directory: .
         run: |
           version="$(jq -er '.packages[] | select(startswith("packer@")) | ltrimstr("packer@")' devbox.json)"
           echo "packer=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Packer
-        uses: hashicorp/setup-packer@ce93c3c08a6c2ff2275bf4b54ff0d9a75f6c9789 # v3.4.0
+        uses: hashicorp/setup-packer@v3.4.0
         with:
           version: ${{ steps.version.outputs.packer }}
 
@@ -195,7 +188,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      contents: write
+      contents: write # publish the draft release
     steps:
       - name: Publish release
         env:

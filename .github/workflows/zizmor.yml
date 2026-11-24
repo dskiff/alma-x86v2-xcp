@@ -1,0 +1,45 @@
+name: zizmor
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/**"
+  # The online audits (known-vulnerable-actions, impostor-commit, ...) can turn
+  # up problems in actions that haven't changed here, so also run weekly.
+  schedule:
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+
+# Deny everything by default; jobs opt in to what they need.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  audit:
+    name: Audit workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out this private repo
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      # The action's default uploads SARIF to code scanning, which a private
+      # repo only has with GitHub Advanced Security. Instead, findings go to
+      # the log and PR annotations, and fail the job. The online audits use
+      # the job's read-only token.
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@v0.9.0
+        with:
+          advanced-security: false
+          annotations: true
