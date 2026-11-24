@@ -17,7 +17,8 @@
 #   - scheduled: no release yet on or after the latest first or third Monday
 #     of a month. The workflow runs daily, so a Monday run that GitHub drops,
 #     or that fails, is retried the next day.
-#   - a template's source ISO (iso_url, iso_checksum) differs from the base's.
+#   - a template's source ISO differs from the base's, by checksum: the same
+#     file at a new URL (such as after a move to vault) isn't a new ISO.
 #   - first: no release in this scheme exists yet.
 #   - manual: a manual run always releases. Off main, it makes a pre-release,
 #     and the other checks are skipped.
@@ -139,7 +140,7 @@ else
     [[ -n "${now}" ]] || continue
     # Empty when the template is newer than the base (a new image).
     was=$(git show "refs/tags/${base}:${template}" 2>/dev/null | isos || true)
-    [[ "${now}" != "${was}" ]] || continue
+    [[ "$(cut -d' ' -f2 <<<"${now}")" != "$(cut -d' ' -f2 <<<"${was}")" ]] || continue
     now_iso=$(awk '{ n = split($1, p, "/"); printf "%s%s", sep, p[n]; sep = ", " }' <<<"${now}")
     was_iso=$(awk '{ n = split($1, p, "/"); printf "%s%s", sep, p[n]; sep = ", " }' <<<"${was}")
     if [[ -z "${was}" ]]; then

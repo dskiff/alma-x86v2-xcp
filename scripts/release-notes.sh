@@ -47,8 +47,10 @@ fi
 # Images in AlmaLinux version order: alma9 before alma10.
 order=$(for i in "${!images[@]}"; do echo "${versions[i]} ${i}"; done | sort -n | cut -d' ' -f2)
 
+# The evidence tarball holds the build directory: the evidence itself is under
+# build-evidence/, where Packer downloads it.
 packages() {
-  tar -xzOf "$1" ./packages.txt
+  tar -xzOf "$1" ./build-evidence/packages.txt
 }
 
 # Compares two packages.txt files (rpm -qa: name-version-release.arch) by

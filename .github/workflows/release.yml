@@ -32,7 +32,9 @@ permissions: {}
 
 # One release run at a time, whatever started it, so two runs can't plan
 # against the same latest release. A run waiting here is replaced by a newer
-# one, which re-checks every reason, so only a waiting manual run can be lost.
+# one. A run on main re-checks every reason, so a replaced scheduled or ISO
+# release still happens, at the latest on the next daily run; a replaced
+# manual run is lost.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -263,7 +265,7 @@ jobs:
           build_dir="${dirs[0]%/}"
           build_name="${build_dir##*/}"
 
-          installed="$(sed -nE 's/^VERSION_ID="?([0-9]+\.[0-9]+)"?$/\1/p' "${build_dir}/os-release")"
+          installed="$(sed -nE 's/^VERSION_ID="?([0-9]+\.[0-9]+)"?$/\1/p' "${build_dir}/build-evidence/os-release")"
           iso="$(sed -nE 's|^[[:space:]]*iso_url[[:space:]]*=.*/AlmaLinux-([0-9]+\.[0-9]+)-[^/"]*-boot\.iso".*$|\1|p' "${IMAGE}.pkr.hcl")"
           if [[ ! "${installed}" =~ ^[0-9]+\.[0-9]+$ || "${installed}" != "${iso}" ]]; then
             echo "::error::${IMAGE} installed AlmaLinux '${installed}' with the '${iso}' installer; bump the ISO in ${IMAGE}.pkr.hcl"
