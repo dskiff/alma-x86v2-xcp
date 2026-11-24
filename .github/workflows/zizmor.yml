@@ -26,19 +26,16 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
-      contents: read # check out this private repo
+      contents: read # check out the repo
+      security-events: write # upload findings to code scanning
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
-      # The action's default uploads SARIF to code scanning, which a private
-      # repo only has with GitHub Advanced Security. Instead, findings go to
-      # the log and PR annotations, and fail the job. The online audits use
-      # the job's read-only token.
+      # Findings are uploaded to code scanning (the action's default), which
+      # shows them on the Security tab and on the PRs that introduce them.
+      # The online audits use the job's token.
       - name: zizmor
         uses: zizmorcore/zizmor-action@v0.9.2
-        with:
-          advanced-security: false
-          annotations: true

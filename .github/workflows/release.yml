@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
-      contents: read # check out this private repo and list its releases
+      contents: read # check out the repo and list its releases
     outputs:
       release: ${{ steps.plan.outputs.release }}
       prerelease: ${{ steps.plan.outputs.prerelease }}
@@ -89,7 +89,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.release == 'true'
     permissions:
-      contents: read # check out this private repo
+      contents: read # check out the repo
     # A local reusable workflow runs from this run's own commit, as
     # documented for ./ paths; the $/ form zizmor suggests is for actions.
     uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
@@ -190,9 +190,9 @@ jobs:
         run: packer init .
 
       # KVM instead of the templates' default TCG, which dev machines need.
-      # The guest still sees an Ivy Bridge CPU. The VM is sized to the runner
-      # (2 vCPUs and 8 GB for private repos): 4 GiB is enough for the text-mode
-      # install and leaves the host room for QEMU.
+      # The guest still sees an Ivy Bridge CPU. The VM gets every vCPU the
+      # runner has, but only 4 GiB: that is enough for the text-mode install
+      # and leaves the host room for QEMU.
       #
       # A failed build deletes its directory, serial.log included, so the
       # guest's console is copied into the job log as it's written. The prefix

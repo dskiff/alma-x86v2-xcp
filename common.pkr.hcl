@@ -14,7 +14,7 @@ packer {
 variable "git_hash" {
   type        = string
   default     = env("GIT_HASH")
-  description = "Commit the image is built from, suffixed with -dirty when packer/ has uncommitted changes. Set by build.sh."
+  description = "Commit the image is built from, suffixed with -dirty when the repository has uncommitted changes. Set by build.sh."
 
   validation {
     condition     = can(regex("^[0-9a-f]{40}(-dirty)?$", var.git_hash))

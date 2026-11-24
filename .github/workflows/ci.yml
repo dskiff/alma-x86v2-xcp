@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
-      contents: read # check out this private repo
+      contents: read # check out the repo
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
-      contents: read # check out this private repo
+      contents: read # check out the repo
     defaults:
       run:
         shell: bash
