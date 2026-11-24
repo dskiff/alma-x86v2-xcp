@@ -21,12 +21,12 @@ if [[ $# -gt 1 || ($# -eq 1 && "$1" != "alma9" && "$1" != "alma10") ]]; then
   exit 2
 fi
 
-# Record exactly what the image is built from. Uncommitted changes under
-# packer/ are flagged, since the hash alone wouldn't describe them.
+# Record exactly what the image is built from. Uncommitted changes in the
+# repository are flagged, since the hash alone wouldn't describe them.
 git_hash=$(git rev-parse HEAD)
 changes=$(git status --porcelain -- .)
 if [[ -n "${changes}" ]]; then
-  echo "WARNING: packer/ has uncommitted changes; labelling the build ${git_hash}-dirty" >&2
+  echo "WARNING: the repository has uncommitted changes; labelling the build ${git_hash}-dirty" >&2
   git_hash="${git_hash}-dirty"
 fi
 
