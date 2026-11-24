@@ -25,6 +25,14 @@ exec > >(tee /tmp/ks-pre-storage.log >/dev/ttyS0) 2>&1
 trap 'echo "%pre: line $${LINENO}: \"$${BASH_COMMAND}\" failed with status $?"' ERR
 set -eux -o pipefail
 
+# If the install later stops on storage, Anaconda's message names only the
+# spoke ("Installation Destination"). Copy its storage log to the console
+# then, so the reason is in serial.log too.
+nohup bash -c '
+  until grep -qs "mandatory spokes are not completed" /tmp/anaconda.log /tmp/syslog; do sleep 5; done
+  sed "s/^/storage.log| /" /tmp/storage.log >/dev/ttyS0
+' </dev/null >/dev/null 2>&1 &
+
 disk=/dev/sda
 
 # 32 hex digits from the image name and a purpose, so each ID is fixed.

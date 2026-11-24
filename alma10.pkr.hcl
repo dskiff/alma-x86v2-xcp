@@ -55,11 +55,6 @@ source "qemu" "alma10" {
     # A per-build file rather than a fixed TCP port, so builds can run in
     # parallel. Follow the install with: tail -f output/<build>/serial.log
     ["-serial", "file:{{ .OutputDir }}/serial.log"],
-    # Anaconda writes its own log to this virtio port when there is one, so
-    # a failed install's reason ends up in anaconda.log beside serial.log.
-    ["-device", "virtio-serial-pci,id=virtio-serial0"],
-    ["-chardev", "file,id=anacondalog,path={{ .OutputDir }}/anaconda.log"],
-    ["-device", "virtserialport,bus=virtio-serial0.0,chardev=anacondalog,name=org.fedoraproject.anaconda.log.0"],
     ["-display", "none"],
   ]
 
