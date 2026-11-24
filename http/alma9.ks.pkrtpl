@@ -1,0 +1,180 @@
+eula --agreed
+text --non-interactive
+
+timezone Etc/UTC --utc
+lang en_US.UTF-8
+keyboard us
+
+skipx
+firstboot --disable
+
+firewall --enabled --ssh
+selinux --enforcing
+
+network --bootproto=dhcp --onboot=on
+
+group --name=localssh --gid=770
+user --name=ansible --gecos="ansible" --groups=wheel,localssh --uid 9001
+rootpw --lock
+
+# Disk partitioning
+ignoredisk --only-use=sda
+bootloader --timeout=3 --location=mbr --boot-drive=sda --append="console=tty0 console=ttyS0,115200n8 no_timer_check net.ifnames=0"
+clearpart --all --initlabel --drives=sda
+zerombr
+
+part biosboot --fstype=biosboot --size=1 --ondisk=sda
+part /boot    --fstype="xfs" --size=1024 --label=boot --asprimary --ondisk=sda
+part pv.01 --grow --asprimary --ondisk=sda
+
+volgroup vg0 pv.01
+logvol /              --vgname=vg0 --name=root      --size=2048 --fstype=xfs --fsoptions='noatime' 
+logvol /opt           --vgname=vg0 --name=opt       --size=128  --fstype=xfs --fsoptions='nodev,noatime' 
+logvol /var           --vgname=vg0 --name=var       --size=4096 --fstype=xfs --fsoptions='nodev,noatime' 
+logvol /var/log       --vgname=vg0 --name=logs      --size=512  --fstype=xfs --fsoptions='nodev,noexec,nosuid,noatime' 
+logvol /var/log/audit --vgname=vg0 --name=auditlogs --size=512  --fstype=xfs --fsoptions='nodev,noexec,nosuid,noatime' 
+logvol /home          --vgname=vg0 --name=home      --size=2048 --fstype=xfs --fsoptions='nodev,nosuid,noatime' 
+logvol swap           --vgname=vg0 --name=swap      --size=1024 --fstype=swap
+
+services --disabled="avahi-daemon.service,bluetooth.service,rhnsd.service,rhsmcertd.service"
+services --enabled="sshd.service,tmp.mount,fstrim.timer,dnf-automatic.timer,xe-linux-distribution.service,cloud-init.service,cloud-final.service,cloud-config.service,cloud-init-local.service,auditd.service"
+
+url --url https://repo.almalinux.org/almalinux/9/BaseOS/x86_64/os
+repo --name=crb  --baseurl=https://repo.almalinux.org/almalinux/9/CRB/$basearch/os/
+repo --name=epel --metalink=https://mirrors.fedoraproject.org/metalink?repo=epel-9&arch=$basearch&infra=$infra&content=$contentdir
+
+%packages --excludedocs --exclude-weakdeps --inst-langs=en
+grub2-pc
+tar
+logrotate
+
+openssh-server
+sudo
+dnf-automatic
+zstd
+
+epel-release
+xe-guest-utilities-latest
+
+cloud-init
+dracut-config-generic
+-dracut-config-rescue
+
+python3
+python3-pexpect
+wget
+
+# OSCAP and CIS compliance packages
+openscap-scanner
+scap-security-guide
+aide
+audit
+policycoreutils
+
+# unnecessary firmware
+-alsa-*
+-ivtv-*
+-*firmware
+-microcode_ctl
+%end
+
+%post --logfile=/root/anaconda-post.log --erroronfail
+set -eux -o pipefail
+
+echo 'Hello, Kickstart!'
+
+# Add tmpfs mounts for /tmp and /var/tmp
+cat >> /etc/fstab << 'EOF'
+# CIS compliant tmpfs mounts
+# /tmp starts without noexec, but the CIS scan in the Packer build adds it
+# (mount_option_tmp_noexec), so the shipped image mounts /tmp noexec.
+tmpfs /tmp tmpfs defaults,nodev,nosuid,size=1G 0 0
+tmpfs /var/tmp tmpfs defaults,nodev,nosuid,noexec,size=512M 0 0
+EOF
+
+# # [ADDITION] Harden /proc with hidepid
+echo '' >>/etc/fstab
+echo '# Harden /proc by mounting with hidepid' >>/etc/fstab
+echo 'proc /proc proc defaults,hidepid=2 0 0' >>/etc/fstab
+
+# Use zstd compression for initramfs
+cat <<"EOF" >/etc/dracut.conf.d/compression.conf
+compress="zstd"
+EOF
+
+# Regenerate initramfs
+# This isn't strictly necessary, but we've had some issues in the past where the initramfs wasn't generated correctly.
+# Let's try to catch it early.
+dracut -fv --regenerate-all
+
+# Limit ssh access to localssh group (which includes ansible user)
+sed -i '/.*AllowGroups.*/d' /etc/ssh/sshd_config
+echo '' >>/etc/ssh/sshd_config
+echo '# CIS 5.2.2 - Ensure SSH access is limited' >>/etc/ssh/sshd_config
+echo 'AllowGroups localssh' >>/etc/ssh/sshd_config
+
+# Default to keys only: refuse passwords over SSH, including through PAM's
+# keyboard-interactive prompt. Passwords still work on the console.
+# sshd keeps the first value it reads and reads sshd_config.d/*.conf in name
+# order, so cloud-init's 50-cloud-init.conf comes first and ssh_pwauth in
+# user-data can still turn passwords on. scripts/check-sshd.sh checks this
+# survives the CIS scan.
+cat <<"EOF" >/etc/ssh/sshd_config.d/90-no-passwords.conf
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+EOF
+chmod 600 /etc/ssh/sshd_config.d/90-no-passwords.conf
+
+# Read cloud-init data only from local seed disks: XO's FAT disk labelled
+# cidata (NoCloud), or a config-2 disk (ConfigDrive). With no list, ds-identify
+# probes every cloud it knows, and on Xen it takes a VM whose UUID looks like an
+# EC2 one (about 1 in 2,000 random UUIDs) for AWS. Once XO deletes the seed
+# disk, that VM would take its config from whatever answers DHCP and the EC2
+# metadata address on the LAN, at every boot.
+# Keep two entries before None. Given one, ds-identify skips detection and
+# enables cloud-init on every boot, and on boots without the seed disk
+# cloud-init replaces the static network config with DHCP.
+# ds-identify only parses the list when it's written on one line.
+cat <<"EOF" >/etc/cloud/cloud.cfg.d/90_datasource_list.cfg
+datasource_list: [ NoCloud, ConfigDrive, None ]
+EOF
+
+# Throwaway key for Packer's build session only (generated by build.sh and
+# removed again by scripts/seal.sh). The image ships without any SSH keys;
+# Use cloud-init to install per-VM keys. The line carries from= and expiry-time=
+# options in case the build stops before seal.sh (see common.pkr.hcl).
+mkdir -p /home/ansible/.ssh
+chmod 700 /home/ansible/.ssh
+echo '${build_ssh_authorized_key}' >/home/ansible/.ssh/authorized_keys
+chmod 600 /home/ansible/.ssh/authorized_keys
+chown -R ansible:ansible /home/ansible/.ssh
+
+# Don't expire ansible password
+chage --lastday $(date --iso-8601) --mindays 7 --maxdays 999999999999 ansible
+
+# Allow sudo without password for ansible
+echo 'ansible ALL=(ALL) NOPASSWD: ALL' >/etc/sudoers.d/ansible
+
+# Stop cloud-init from creating its default user on each clone's first boot.
+# The stock cloud.cfg has "users: [default]", and the default user (almalinux
+# or cloud-user) gets passwordless sudo: a second root-equivalent account next
+# to ansible. cloud.cfg.d overrides cloud.cfg, later file names win, and lists
+# are replaced rather than merged. User-data can still create users.
+# scripts/check-cloud-init-users.sh checks the result.
+cat <<"EOF" >/etc/cloud/cloud.cfg.d/99_no_default_user.cfg
+users: []
+EOF
+
+# Install security updates automatically (dnf-automatic.timer is enabled above).
+# It never reboots: new kernels take effect at the next planned reboot.
+sed -i -E 's/^upgrade_type\s*=.*/upgrade_type = security/; s/^apply_updates\s*=.*/apply_updates = yes/' /etc/dnf/automatic.conf
+grep -qx 'upgrade_type = security' /etc/dnf/automatic.conf
+grep -qx 'apply_updates = yes' /etc/dnf/automatic.conf
+
+# Cleanup happens in scripts/seal.sh at the very end of the Packer build:
+# anything cleaned here would be recreated by the build's own boot and scan.
+
+%end
+
+reboot --eject
+
