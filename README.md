@@ -69,6 +69,18 @@ Fedora's EPEL 10 is built for x86_64_v3, so `alma10` uses AlmaLinux's v2 rebuild
 instead. That is a different publisher from Fedora EPEL: AlmaLinux, not the
 Fedora Project, builds those packages.
 
+## releases
+
+Each release rebuilds every image with the packages current that day. Releases
+go out on the first and third Monday of each month, when a template moves to a
+new AlmaLinux point release, and by hand as needed, such as for a security fix.
+
+Releases are versioned `v0.<UTC date>.<n>`, such as `v0.20261207.0`; `n` counts
+that day's releases. Each image is named after the AlmaLinux version it
+contains, `alma9-9.9-v0.20261207.0.vhd.zst`, with its checksums (`.SHA256SUMS`)
+and build evidence (`.evidence.tar.gz`) beside it. In a VM,
+`/root/build_info.yaml` records the release it was cloned from.
+
 ## AI disclosure
 
 Early versions of this were pre-LLM, but in the last few years there have

@@ -1,40 +1,153 @@
 name: Release
 
+# Builds every image and publishes them as one release, versioned
+# v0.<UTC date>.<patch> (see scripts/release-version.sh). A run releases only
+# when scripts/release-plan.sh finds a reason to:
+#   - scheduled: the first and third Monday of each month
+#   - a template's source ISO changed since the latest release
+#   - a manual run, such as for a security fix. From a branch other than
+#     main, it makes a pre-release instead.
+# Image changes merged to main wait for the next of these.
+
 on:
+  # Daily rather than only on Mondays. Cron can't express "first and third
+  # Monday" (given both a day of the month and a weekday, it fires when either
+  # matches), and a Monday run that GitHub drops, or that fails, is retried the
+  # next day. Off the hour, when GitHub delays scheduled runs the most.
+  schedule:
+    - cron: "37 9 * * *"
+  # Renovate's ISO bumps, released as soon as they merge. The plan compares the
+  # ISOs with the latest release's, so other template changes don't release.
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: ["alma*.pkr.hcl"]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Why release now (goes into the release notes)
+        required: true
+        type: string
 
 permissions: {}
 
+# One release run at a time, whatever started it, so two runs can't plan
+# against the same latest release. A run waiting here is replaced by a newer
+# one, which re-checks every reason, so only a waiting manual run can be lost.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 env:
   GH_REPO: ${{ github.repository }}
-  TAG: ${{ github.ref_name }}
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  draft:
-    name: Draft release
+  plan:
+    name: Plan
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
-      contents: write # create the draft release
+      contents: read # check out this private repo and list its releases
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      date: ${{ steps.plan.outputs.date }}
+      base: ${{ steps.plan.outputs.base }}
+      reasons: ${{ steps.plan.outputs.reasons }}
     steps:
-      # The images upload to a draft, and the publish job releases it once
-      # every image is attached. An existing release is used as is.
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          # With tags: the plan reads the latest release's templates.
+          fetch-depth: 0
+
+      # Published releases only: a failed attempt's tag or draft doesn't count
+      # as a release.
+      - name: Decide whether to release
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_REASON: ${{ inputs.reason }}
+        run: |
+          gh api --paginate "repos/${GH_REPO}/releases?per_page=100" \
+            --jq '.[] | select((.draft or .prerelease) | not) | .tag_name' \
+            | scripts/release-plan.sh
+
+  # The same checks as a PR, on the commit about to be released. Among them,
+  # verify-iso.sh fails within a minute when a point release has moved an ISO
+  # to vault, before anything is tagged.
+  ci:
+    name: CI
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    permissions:
+      contents: read # check out this private repo
+    # A local reusable workflow runs from this run's own commit, as
+    # documented for ./ paths; the $/ form zizmor suggests is for actions.
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
+
+  # The tag is created first, as the version's reservation: creating a tag that
+  # exists fails, so a version is never handed out twice. The images then
+  # upload to a draft, and the publish job releases it once every image is
+  # attached. "Re-run failed jobs" keeps this job's tag, so a re-run finishes
+  # the same draft.
+  draft:
+    name: Draft release
+    needs: [plan, ci]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # create the tag and the draft release
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      # A name can also fail because it's burned: GitHub won't reuse the tag
+      # name of a deleted immutable release, and no longer lists it. So a
+      # failure moves on to the next version, a few times.
+      - name: Tag the next version
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DATE: ${{ needs.plan.outputs.date }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+          SHA: ${{ github.sha }}
+        run: |
+          taken="$(gh api --paginate "repos/${GH_REPO}/git/matching-refs/tags/v0.${DATE}." \
+            --jq '.[].ref | ltrimstr("refs/tags/")')"
+          for _ in 1 2 3 4 5; do
+            tag="$(scripts/release-version.sh "${DATE}" "${PRERELEASE}" <<<"${taken}")"
+            if gh api --method POST "repos/${GH_REPO}/git/refs" \
+              -f "ref=refs/tags/${tag}" -f "sha=${SHA}" >/dev/null; then
+              echo "Tagged ${SHA} as ${tag}"
+              echo "tag=${tag}" >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::warning::Couldn't create the tag ${tag}; trying the next version"
+            taken+=$'\n'"${tag}"
+          done
+          echo "::error::Couldn't create a tag for ${DATE}"
+          exit 1
+
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if gh release view "${TAG}" >/dev/null 2>&1; then
-            echo "Release ${TAG} already exists; the images will be added to it."
-            exit 0
-          fi
-          flags=(--draft --verify-tag --generate-notes)
-          # Tags like v1.2.0-rc1 are pre-releases.
-          if [[ "${TAG}" == *-* ]]; then
+          flags=(--draft --verify-tag --title "${TAG}" --notes "Building in ${RUN_URL}")
+          if [[ "${PRERELEASE}" == true ]]; then
             flags+=(--prerelease)
           fi
           gh release create "${TAG}" "${flags[@]}"
@@ -54,19 +167,12 @@ jobs:
         image: [alma9, alma10]
     env:
       IMAGE: ${{ matrix.image }}
-    defaults:
-      run:
-        shell: bash
+      TAG: ${{ needs.draft.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-
-      # A tag can point at a commit the CI workflow never checked, so the
-      # ISO's checksum is checked against AlmaLinux's signature here too.
-      - name: Verify ISO checksum against AlmaLinux's signature
-        run: ./verify-iso.sh "${IMAGE}.pkr.hcl"
 
       # devbox.json is the single source of truth for tool versions (and is
       # what Renovate bumps), so CI uses the same Packer as `devbox shell`.
@@ -209,18 +315,54 @@ jobs:
 
   publish:
     name: Publish release
-    needs: images
+    needs: [plan, draft, images]
     runs-on: ubuntu-26.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
-      contents: write # publish the draft release
+      contents: write # write the notes and publish the draft release
+    env:
+      TAG: ${{ needs.draft.outputs.tag }}
+      BASE: ${{ needs.plan.outputs.base }}
+      PRERELEASE: ${{ needs.plan.outputs.prerelease }}
     steps:
+      # The notes lead with why this release happened. The repository changes
+      # are GitHub's generated notes, counted from the latest full release so
+      # that pre-releases don't cut the range short.
+      - name: Write release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REASONS: ${{ needs.plan.outputs.reasons }}
+        run: |
+          notes="${RUNNER_TEMP}/notes.md"
+          args=(-f "tag_name=${TAG}")
+          if [[ -n "${BASE}" ]]; then
+            args+=(-f "previous_tag_name=${BASE}")
+          fi
+          {
+            echo "## Why"
+            echo
+            while IFS= read -r reason; do
+              echo "- ${reason}"
+            done <<<"${REASONS}"
+            echo
+            gh api --method POST "repos/${GH_REPO}/releases/generate-notes" "${args[@]}" --jq .body
+          } >"${notes}"
+          cat "${notes}"
+          echo "NOTES=${notes}" >>"$GITHUB_ENV"
+
+      # "legacy" lets GitHub pick the latest release by creation date and
+      # version, which agree in this scheme. Publishing marks itself latest by
+      # default, so a re-run that finishes an older draft would otherwise
+      # displace a newer release. A pre-release is never the latest.
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ "$(gh release view "${TAG}" --json isDraft --jq .isDraft)" == "true" ]]; then
-            gh release edit "${TAG}" --draft=false
-          else
-            echo "Release ${TAG} was already published; the images are attached."
+          latest=legacy
+          if [[ "${PRERELEASE}" == true ]]; then
+            latest=false
           fi
+          id="$(gh release view "${TAG}" --json databaseId --jq .databaseId)"
+          gh api --method PATCH "repos/${GH_REPO}/releases/${id}" \
+            -F draft=false -f "make_latest=${latest}" -F "body=@${NOTES}" \
+            --jq '"Published \(.html_url)"'
