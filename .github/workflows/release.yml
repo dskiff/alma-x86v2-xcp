@@ -98,7 +98,8 @@ jobs:
   # reserves it (creating a tag that exists fails), and creates the draft the
   # images upload to; the publish job releases it once every image is attached.
   # A re-run of this run reuses its draft, and drafts that failed runs left
-  # behind are deleted, so at most one unpublished draft is ever kept.
+  # behind are deleted, so at most one unpublished draft is ever kept. A retry
+  # whose plan predates the latest release fails instead of releasing.
   draft:
     name: Draft release
     needs: [plan, ci]
@@ -121,6 +122,7 @@ jobs:
           DATE: ${{ needs.plan.outputs.date }}
           PRERELEASE: ${{ needs.plan.outputs.prerelease }}
           SHA: ${{ github.sha }}
+          BASE: ${{ needs.plan.outputs.base }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: scripts/release-draft.sh
 
