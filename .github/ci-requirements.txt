@@ -1,0 +1,5 @@
+# Linters for .github/workflows/ci.yml. Renovate bumps these pins.
+# pykickstart's own dependency, requests, isn't pinned: pip installs its
+# newest release.
+pykickstart==3.78
+shellcheck-py==0.11.0.1

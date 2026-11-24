@@ -5,7 +5,7 @@
   ],
   "customDatasources": {
     "almalinux-iso": {
-      "description": "AlmaLinux boot ISO versions and SHA256 digests, parsed from the clearsigned CHECKSUM file that sits next to the ISO (lines look like 'SHA256 (AlmaLinux-9.8-x86_64-boot.iso) = <hex>'). Renovate doesn't check the signature; CI does, with packer/verify-iso.sh.",
+      "description": "AlmaLinux boot ISO versions and SHA256 digests, parsed from the clearsigned CHECKSUM file that sits next to the ISO (lines look like 'SHA256 (AlmaLinux-9.8-x86_64-boot.iso) = <hex>'). Renovate doesn't check the signature; CI does, with verify-iso.sh.",
       "defaultRegistryUrlTemplate": "{{{packageName}}}",
       "format": "plain",
       "transformTemplates": [
