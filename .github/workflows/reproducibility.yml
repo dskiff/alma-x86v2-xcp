@@ -98,13 +98,7 @@ jobs:
           PKR_VAR_memory: "4096"
           FINALIZE_REQUIRE_NORMALIZE: "1"
         run: |
-          (
-            shopt -s nullglob
-            until logs=(output/"alma_${IMAGE#alma}"_*/serial.log); ((${#logs[@]})); do
-              sleep 5
-            done
-            tail -n +1 -F "${logs[0]}" 2>/dev/null | sed -u 's/^/serial| /'
-          ) &
+          scripts/repro/watch-install.sh "${IMAGE}" &
           watcher=$!
           trap 'pkill -P "${watcher}" || true; kill "${watcher}" 2>/dev/null || true' EXIT
           PKR_VAR_cpus="$(nproc)" ./build.sh "${IMAGE}"
@@ -121,13 +115,7 @@ jobs:
           PKR_VAR_memory: "4096"
           FINALIZE_REQUIRE_NORMALIZE: "1"
         run: |
-          (
-            shopt -s nullglob
-            until logs=(output/"alma_${IMAGE#alma}"_*/serial.log); ((${#logs[@]})); do
-              sleep 5
-            done
-            tail -n +1 -F "${logs[0]}" 2>/dev/null | sed -u 's/^/serial| /'
-          ) &
+          scripts/repro/watch-install.sh "${IMAGE}" &
           watcher=$!
           trap 'pkill -P "${watcher}" || true; kill "${watcher}" 2>/dev/null || true' EXIT
           PKR_VAR_cpus="$(nproc)" ./build.sh "${IMAGE}"

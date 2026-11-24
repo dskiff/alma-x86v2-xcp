@@ -9,14 +9,14 @@ ignoredisk --only-use=sda
 bootloader --timeout=3 --location=mbr --boot-drive=sda --append="console=tty0 console=ttyS0,115200n8 no_timer_check net.ifnames=0"
 
 part /boot --onpart=sda2 --noformat
-volgroup vg0 --useexisting --noformat
-logvol /              --vgname=vg0 --name=root      --useexisting --noformat --fsoptions='noatime'
-logvol /opt           --vgname=vg0 --name=opt       --useexisting --noformat --fsoptions='nodev,noatime'
-logvol /var           --vgname=vg0 --name=var       --useexisting --noformat --fsoptions='nodev,noatime'
-logvol /var/log       --vgname=vg0 --name=logs      --useexisting --noformat --fsoptions='nodev,noexec,nosuid,noatime'
-logvol /var/log/audit --vgname=vg0 --name=auditlogs --useexisting --noformat --fsoptions='nodev,noexec,nosuid,noatime'
-logvol /home          --vgname=vg0 --name=home      --useexisting --noformat --fsoptions='nodev,nosuid,noatime'
-logvol swap           --vgname=vg0 --name=swap      --useexisting --noformat
+volgroup vg0 --noformat
+logvol /              --vgname=vg0 --name=root      --noformat --fsoptions='noatime'
+logvol /opt           --vgname=vg0 --name=opt       --noformat --fsoptions='nodev,noatime'
+logvol /var           --vgname=vg0 --name=var       --noformat --fsoptions='nodev,noatime'
+logvol /var/log       --vgname=vg0 --name=logs      --noformat --fsoptions='nodev,noexec,nosuid,noatime'
+logvol /var/log/audit --vgname=vg0 --name=auditlogs --noformat --fsoptions='nodev,noexec,nosuid,noatime'
+logvol /home          --vgname=vg0 --name=home      --noformat --fsoptions='nodev,nosuid,noatime'
+logvol swap           --vgname=vg0 --name=swap      --noformat
 
 %pre --erroronfail --log=/tmp/ks-pre-storage.log
 set -eux -o pipefail
