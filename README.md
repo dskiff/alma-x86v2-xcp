@@ -33,9 +33,8 @@ PKR_VAR_accelerator=kvm ./build.sh alma9   # on an x86 Linux host with /dev/kvm
 ## accounts
 
 The only login is `ansible`, with passwordless sudo. The image gives it no SSH
-keys and no password: install keys on first boot with cloud-init, as
-[`tf/reusable/alma-fixed/cloud-init.yml`](../tf/reusable/alma-fixed/cloud-init.yml)
-does. SSH takes keys only, and users must members of the `localssh` group.
+keys and no password: install keys on first boot with cloud-init.
+SSH takes keys only, and users must members of the `localssh` group.
 
 cloud-init's default user (`almalinux` or `cloud-user`) is turned off, so
 top-level `ssh_authorized_keys` in user-data, which would go to that user,
