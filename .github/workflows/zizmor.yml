@@ -27,17 +27,15 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read # check out the repo
+      security-events: write # upload findings to code scanning
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
-      # Findings go to the log and PR annotations, and fail the job, instead
-      # of being uploaded to code scanning (the action's default), so the job
-      # needs no write access. The online audits use the job's read-only token.
+      # Findings are uploaded to code scanning (the action's default), which
+      # shows them on the Security tab and on the PRs that introduce them.
+      # The online audits use the job's token.
       - name: zizmor
         uses: zizmorcore/zizmor-action@v0.9.2
-        with:
-          advanced-security: false
-          annotations: true
