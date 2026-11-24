@@ -1,0 +1,208 @@
+name: Release
+
+# Pushing a v* tag (or creating a release in the GitHub UI, which pushes its
+# tag) builds the Packer images and attaches them to that tag's release.
+on:
+  push:
+    tags: ["v*"]
+
+# Deny everything by default; jobs opt in to what they need.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GH_REPO: ${{ github.repository }}
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  draft:
+    name: Draft release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # The images upload to a draft, and the publish job releases it once
+      # every image is attached. An existing release is used as is.
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; the images will be added to it."
+            exit 0
+          fi
+          flags=(--draft --verify-tag --generate-notes)
+          # Tags like v1.2.0-rc1 are pre-releases.
+          if [[ "${TAG}" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "${TAG}" "${flags[@]}"
+
+  images:
+    name: Image (${{ matrix.image }})
+    needs: draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    # Write access is for the upload step. Passing the images to a separate
+    # job would mean storing GBs as workflow artifacts, which quickly exhausts
+    # a private repo's artifact storage.
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [alma9, alma10]
+    env:
+      IMAGE: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: packer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A tag can point at a commit the Packer workflow never checked, so the
+      # ISO's checksum is checked against AlmaLinux's signature here too.
+      - name: Verify ISO checksum against AlmaLinux's signature
+        run: ./verify-iso.sh "${IMAGE}.pkr.hcl"
+
+      # devbox.json is the single source of truth for tool versions (and is
+      # what Renovate bumps), so CI uses the same Packer as `devbox shell`.
+      - name: Read Packer version from devbox.json
+        id: version
+        working-directory: .
+        run: |
+          version="$(jq -er '.packages[] | select(startswith("packer@")) | ltrimstr("packer@")' devbox.json)"
+          echo "packer=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@ce93c3c08a6c2ff2275bf4b54ff0d9a75f6c9789 # v3.4.0
+        with:
+          version: ${{ steps.version.outputs.packer }}
+
+      # Ubuntu's QEMU rather than devbox's; the image doesn't depend on which
+      # QEMU builds it.
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils zstd
+
+      # The runners support KVM, but /dev/kvm is root-only by default.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle
+          if [[ ! -w /dev/kvm ]]; then
+            echo "::error::/dev/kvm isn't available on this runner"
+            exit 1
+          fi
+
+      # Plugin discovery hits the GitHub API; authenticate so the shared
+      # per-IP anonymous rate limit can't fail the job. Scoped to this step
+      # only: build.sh's own `packer init` then finds the plugin installed.
+      - name: packer init
+        env:
+          PACKER_GITHUB_API_TOKEN: ${{ github.token }}
+        run: packer init .
+
+      # KVM instead of the templates' default TCG, which dev machines need.
+      # The guest still sees an Ivy Bridge CPU. The VM is sized to the runner
+      # (2 vCPUs and 8 GB for private repos): 4 GiB is enough for the text-mode
+      # install and leaves the host room for QEMU.
+      #
+      # A failed build deletes its directory, serial.log included, so the
+      # guest's console is copied into the job log as it's written. The prefix
+      # stops a guest line from starting with "::" (a workflow command).
+      - name: Build
+        env:
+          PKR_VAR_accelerator: kvm
+          PKR_VAR_memory: "4096"
+        run: |
+          (
+            shopt -s nullglob
+            until logs=(output/"alma_${IMAGE#alma}"_*/serial.log); ((${#logs[@]})); do
+              sleep 5
+            done
+            tail -n +1 -F "${logs[0]}" 2>/dev/null | sed -u 's/^/serial| /'
+          ) &
+          watcher=$!
+          trap 'pkill -P "${watcher}" || true; kill "${watcher}" 2>/dev/null || true' EXIT
+          PKR_VAR_cpus="$(nproc)" ./build.sh "${IMAGE}"
+
+      # Release assets must be under 2 GiB, which the raw VHD may not be, so it
+      # ships zstd-compressed. Each image also gets a checksum file (for the
+      # .vhd and the .vhd.zst) and a tarball of the rest of its build
+      # directory: the build evidence and the serial log.
+      - name: Package
+        id: package
+        run: |
+          shopt -s nullglob
+          dirs=(output/"alma_${IMAGE#alma}"_*/)
+          if [[ ${#dirs[@]} -ne 1 ]]; then
+            echo "::error::Expected one build directory for ${IMAGE}, found ${#dirs[@]}"
+            exit 1
+          fi
+          build_dir="${dirs[0]%/}"
+          name="${build_dir##*/}"
+          dist="${RUNNER_TEMP}/dist"
+          mkdir -p "${dist}"
+
+          zstd -T0 -12 -q -o "${dist}/${name}.vhd.zst" "${build_dir}/${name}.vhd"
+          cp "${build_dir}/SHA256SUMS" "${dist}/${name}.SHA256SUMS"
+          (cd "${dist}" && sha256sum "${name}.vhd.zst" >> "${name}.SHA256SUMS")
+          tar -C "${build_dir}" --exclude="${name}.vhd" --exclude="packer-${IMAGE}" \
+            -czf "${dist}/${name}.evidence.tar.gz" .
+
+          for f in "${dist}"/*; do
+            if (( $(stat -c %s "${f}") >= 2 * 1024 ** 3 )); then
+              echo "::error::${f##*/} exceeds GitHub's 2 GiB limit for release assets"
+              exit 1
+            fi
+          done
+          ls -l "${dist}"
+          echo "dist=${dist}" >> "$GITHUB_OUTPUT"
+
+      # A re-run builds the image again under a new name, so this image's
+      # assets from earlier runs are removed once the new ones are up.
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIST: ${{ steps.package.outputs.dist }}
+        run: |
+          prefix="alma_${IMAGE#alma}_"
+          old="$(gh release view "${TAG}" --json assets \
+            --jq ".assets[].name | select(startswith(\"${prefix}\"))")"
+          gh release upload "${TAG}" "${DIST}"/* --clobber
+          while IFS= read -r asset; do
+            if [[ -n "${asset}" && ! -e "${DIST}/${asset}" ]]; then
+              gh release delete-asset "${TAG}" "${asset}" --yes
+            fi
+          done <<<"${old}"
+
+  publish:
+    name: Publish release
+    needs: images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$(gh release view "${TAG}" --json isDraft --jq .isDraft)" == "true" ]]; then
+            gh release edit "${TAG}" --draft=false
+          else
+            echo "Release ${TAG} was already published; the images are attached."
+          fi

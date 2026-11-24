@@ -1,0 +1,74 @@
+name: Packer
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Deny everything by default; jobs opt in to what they need.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+        working-directory: packer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Renovate takes iso_checksum from the CHECKSUM file next to the ISO but
+      # never checks that file's signature. This does, against the AlmaLinux
+      # release keys pinned in verify-iso.sh, so an ISO bump only passes if
+      # AlmaLinux signed the digest it brings in.
+      - name: Verify ISO checksums against AlmaLinux's signature
+        run: ./verify-iso.sh
+
+      # devbox.json is the single source of truth for tool versions (and is
+      # what Renovate bumps), so CI uses the same Packer as `devbox shell`.
+      - name: Read Packer version from devbox.json
+        id: version
+        working-directory: .
+        run: |
+          version="$(jq -er '.packages[] | select(startswith("packer@")) | ltrimstr("packer@")' devbox.json)"
+          echo "packer=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@ce93c3c08a6c2ff2275bf4b54ff0d9a75f6c9789 # v3.4.0
+        with:
+          version: ${{ steps.version.outputs.packer }}
+
+      - name: packer fmt
+        run: packer fmt -check -recursive -diff .
+
+      # Plugin discovery hits the GitHub API; authenticate so the shared
+      # per-IP anonymous rate limit can't fail the job. Scoped to this step only.
+      - name: packer init
+        env:
+          PACKER_GITHUB_API_TOKEN: ${{ github.token }}
+        run: packer init .
+
+      # Validation only; no ISO download, VM boot, or XO upload happens here.
+      # Passes the same variables build.sh does. The key is a throwaway that
+      # only has to satisfy the templates' validation rules.
+      - name: packer validate
+        run: |
+          key_dir="$(mktemp -d)"
+          ssh-keygen -q -t ed25519 -N '' -C packer-ci -f "${key_dir}/id_ed25519"
+          packer validate \
+            -var "git_hash=${GITHUB_SHA}" \
+            -var "build_ssh_public_key=$(cat "${key_dir}/id_ed25519.pub")" \
+            .

@@ -1,0 +1,113 @@
+{
+  "lockfile_version": "1",
+  "packages": {
+    "github:NixOS/nixpkgs/nixpkgs-unstable": {
+      "last_modified": "2026-11-22T18:15:35Z",
+      "resolved": "github:NixOS/nixpkgs/619c39f6eac5d1ed6b8f073a9414baf7034b2356?lastModified=1795371335&narHash=sha256-oa2P5WZer1A4wuhatl92JyHHEjrrOdIyuvTuI5LUi9Q%3D"
+    },
+    "packer@1.16.2": {
+      "last_modified": "2026-11-22T18:15:35Z",
+      "resolved": "github:NixOS/nixpkgs/619c39f6eac5d1ed6b8f073a9414baf7034b2356#packer",
+      "source": "devbox-search",
+      "version": "1.16.2",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/51km3jpfq1wkcb5vj4h9iwlf5xprgj0z-packer-1.16.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/51km3jpfq1wkcb5vj4h9iwlf5xprgj0z-packer-1.16.2"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/qzcmykyiawi0jpynslxqy9h6nih9yv4h-packer-1.16.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/qzcmykyiawi0jpynslxqy9h6nih9yv4h-packer-1.16.2"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/q7n9qrp315sn97n22yidybkmvhkfp44v-packer-1.16.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/q7n9qrp315sn97n22yidybkmvhkfp44v-packer-1.16.2"
+        }
+      }
+    },
+    "qemu@11.1.2": {
+      "last_modified": "2026-11-22T18:15:35Z",
+      "resolved": "github:NixOS/nixpkgs/619c39f6eac5d1ed6b8f073a9414baf7034b2356#qemu",
+      "source": "devbox-search",
+      "version": "11.1.2",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/j1xwm3p5zr4sia2glsp8r2ilpvp4h5cd-qemu-11.1.2",
+              "default": true
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/8i1yvf4q0dd6mz0pax8g2cc9240hybsn-qemu-11.1.2-doc"
+            }
+          ],
+          "store_path": "/nix/store/j1xwm3p5zr4sia2glsp8r2ilpvp4h5cd-qemu-11.1.2"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/vm1kw8w9yjs1c1jr89gqgf99l59dx9c7-qemu-11.1.2",
+              "default": true
+            },
+            {
+              "name": "debug",
+              "path": "/nix/store/ynwgx5av587jkfy8nywd147hy74ngafl-qemu-11.1.2-debug"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/5wdzqjakq3ykp8i01fmcsr7ab3ln3xv0-qemu-11.1.2-doc"
+            },
+            {
+              "name": "ga",
+              "path": "/nix/store/mkgy1jma0nah1hf3wmaqbl2sajp0h5qc-qemu-11.1.2-ga"
+            }
+          ],
+          "store_path": "/nix/store/vm1kw8w9yjs1c1jr89gqgf99l59dx9c7-qemu-11.1.2"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/xpzp1g6k9328b96c8gwv16kkh5vpysh9-qemu-11.1.2",
+              "default": true
+            },
+            {
+              "name": "debug",
+              "path": "/nix/store/1b0zpxm8796civ8yyfm12xrrip2z0x9c-qemu-11.1.2-debug"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/msgfym86xy0b4riqqfpfsk5bgb5lzlpr-qemu-11.1.2-doc"
+            },
+            {
+              "name": "ga",
+              "path": "/nix/store/psjjmb4g4vwbjf8jgij83r4ajbrsxvgm-qemu-11.1.2-ga"
+            }
+          ],
+          "store_path": "/nix/store/xpzp1g6k9328b96c8gwv16kkh5vpysh9-qemu-11.1.2"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices"
+  ],
+  "customDatasources": {
+    "almalinux-iso": {
+      "description": "AlmaLinux boot ISO versions and SHA256 digests, parsed from the clearsigned CHECKSUM file that sits next to the ISO (lines look like 'SHA256 (AlmaLinux-9.8-x86_64-boot.iso) = <hex>'). Renovate doesn't check the signature; CI does, with packer/verify-iso.sh.",
+      "defaultRegistryUrlTemplate": "{{{packageName}}}",
+      "format": "plain",
+      "transformTemplates": [
+        "{\"releases\": [releases.$match(version, /^SHA256 \\(AlmaLinux-(\\d+\\.\\d+)-\\w+-boot\\.iso\\) = ([0-9a-f]{64})$/).{\"version\": groups[0], \"digest\": groups[1]}]}"
+      ]
+    }
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Bump the AlmaLinux boot ISO (iso_url + iso_checksum) in Packer templates.",
+      "managerFilePatterns": [
+        "/^.+\\.pkr\\.hcl$/"
+      ],
+      "matchStrings": [
+        "iso_url\\s*=\\s*\"(?<isoDir>https://[^\"]+)/AlmaLinux-(?<currentValue>(?<major>\\d+)\\.\\d+)-(?<arch>\\w+)-boot\\.iso\"\\s+iso_checksum\\s*=\\s*\"sha256:(?<currentDigest>[0-9a-f]{64})\""
+      ],
+      "datasourceTemplate": "custom.almalinux-iso",
+      "depNameTemplate": "AlmaLinux {{{major}}} {{{arch}}} boot ISO",
+      "packageNameTemplate": "{{{isoDir}}}/CHECKSUM",
+      "versioningTemplate": "loose"
+    },
+    {
+      "customType": "regex",
+      "description": "Bump the exact Packer plugin pins in required_plugins (Packer has no plugin lockfile). A source of github.com/<owner>/<name> is the GitHub repo <owner>/packer-plugin-<name>.",
+      "managerFilePatterns": [
+        "/^.+\\.pkr\\.hcl$/"
+      ],
+      "matchStrings": [
+        "version\\s*=\\s*\"(?<currentValue>[^\"]+)\"\\s+source\\s*=\\s*\"github\\.com/(?<owner>[\\w.-]+)/(?<name>[\\w.-]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "{{{owner}}}/packer-plugin-{{{name}}}",
+      "extractVersionTemplate": "^v(?<version>.+)$",
+      "versioningTemplate": "semver"
+    }
+  ]
+}
