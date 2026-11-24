@@ -22,7 +22,7 @@ dir=${dirs[0]}
 
 tail -n +1 -F "${dir}serial.log" 2>/dev/null | while IFS= read -r line; do
   printf 'serial| %s\n' "${line}"
-  if [[ "${line}" == *"The installation was stopped due to an error"* ]]; then
+  if [[ "${line}" == *"The installation was stopped due to an error"* || "${line}" == *"pyanaconda.errors.ScriptError"* ]]; then
     sleep 15 # let the installer finish logging the reason
     echo "::error::The ${image} install failed; the installer's log follows"
     if [[ -f "${dir}anaconda.log" ]]; then
@@ -31,5 +31,6 @@ tail -n +1 -F "${dir}serial.log" 2>/dev/null | while IFS= read -r line; do
       echo "(no anaconda.log)"
     fi
     pkill -INT -f "packer build" || true
+    break
   fi
 done

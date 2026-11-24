@@ -18,7 +18,11 @@ logvol /var/log/audit --vgname=vg0 --name=auditlogs --noformat --fsoptions='node
 logvol /home          --vgname=vg0 --name=home      --noformat --fsoptions='nodev,nosuid,noatime'
 logvol swap           --vgname=vg0 --name=swap      --noformat
 
-%pre --erroronfail --log=/tmp/ks-pre-storage.log
+%pre --erroronfail --interpreter=/bin/bash
+# Everything this prints goes to the serial console too (the build's
+# serial.log): Anaconda only reports that a %pre script failed, not why.
+exec > >(tee /tmp/ks-pre-storage.log >/dev/ttyS0) 2>&1
+trap 'echo "%pre: line $${LINENO}: \"$${BASH_COMMAND}\" failed with status $?"' ERR
 set -eux -o pipefail
 
 disk=/dev/sda
@@ -44,6 +48,7 @@ lvmuuid() {
 # but don't rely on it.
 vgchange -an || true
 wipefs -a "$${disk}"
+udevadm settle
 
 # MBR with a fixed disk ID. The layout is what Anaconda made before: a 1 MiB
 # partition the MBR doesn't use, a 1 GiB /boot, and LVM on the rest.
