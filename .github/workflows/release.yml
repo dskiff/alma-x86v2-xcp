@@ -46,7 +46,7 @@ jobs:
     name: Image (${{ matrix.image }})
     needs: draft
     runs-on: ubuntu-26.04
-    timeout-minutes: 120
+    timeout-minutes: 20
     # Write access is for the upload step. Passing the images to a separate
     # job would mean storing GBs as workflow artifacts, which quickly exhausts
     # a private repo's artifact storage.
