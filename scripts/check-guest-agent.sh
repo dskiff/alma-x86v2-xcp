@@ -1,7 +1,7 @@
 #!/bin/bash
-# Run the guest agent's binaries here, so a build for a newer x86-64 level 
-# (Fedora's EPEL 10 targets x86-64-v3) fails the
-# image build instead of silently failing on every VM.
+# Run the guest agent's binaries here, so a build for a newer x86-64 level
+# (Fedora's EPEL 10 targets x86-64-v3) fails the image build instead of
+# silently failing on every VM.
 #
 # Under TCG (the default), a newer instruction raises SIGILL. Under KVM (CI's
 # release builds), CPUID still reports Ivy Bridge, so Go's startup check fires,

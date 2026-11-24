@@ -84,5 +84,5 @@ version it contains, `alma9-9.9-v0.20261207.0.vhd.zst`, with its checksums
 ## AI disclosure
 
 Early versions of this were pre-LLM, but in the last few years there have
-been significant contributions using generative AI tools. 
+been significant contributions using generative AI tools.
 Take that as you will. Use at your own risk.
