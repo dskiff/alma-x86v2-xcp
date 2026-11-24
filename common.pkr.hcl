@@ -13,7 +13,7 @@ packer {
 
 variable "git_hash" {
   type        = string
-  default     = env("GIT_HASH")
+  default     = ""
   description = "Commit the image is built from, suffixed with -dirty when the repository has uncommitted changes. Set by build.sh."
 
   validation {

@@ -47,6 +47,6 @@ find /var/log -type f -not -path '/var/log/journal/*' -exec truncate -s 0 {} +
 # Overwrite anything secret before deleting it, as the host keys are above.
 findmnt -rn -t xfs -o TARGET | while read -r mnt; do fstrim -v "$mnt"; done
 
-# Last: remove the throwaway build key; Use cloud-init to install per-VM keys.
+# Last: remove the throwaway build key: use cloud-init to install per-VM keys.
 # Packer keeps its current SSH connection open for the shutdown command.
 rm -f /home/ansible/.ssh/authorized_keys
