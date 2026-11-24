@@ -4,7 +4,7 @@ source "qemu" "alma9" {
   cpus        = var.cpus
   memory      = var.memory
   # Renovate bumps iso_url + iso_checksum together (see renovate.json); keep them adjacent.
-  iso_url      = "https://raw.repo.almalinux.org/almalinux/9/isos/x86_64/AlmaLinux-9.9-x86_64-boot.iso"
+  iso_url      = "https://repo.almalinux.org/almalinux/9/isos/x86_64/AlmaLinux-9.9-x86_64-boot.iso"
   iso_checksum = "sha256:b42da86274caabc56294ab9bc37d1bb8b2298fcf4304dca40c21d4cfb938f651"
 
   # The kickstart is rendered per build because it carries the throwaway build

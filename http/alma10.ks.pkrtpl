@@ -40,7 +40,7 @@ logvol swap           --vgname=vg0 --name=swap      --size=1024 --fstype=swap
 %addon com_redhat_kdump --disable
 %end
 
-services --disabled="avahi-daemon.service,bluetooth.service,rhnsd.service,rhsmcertd.service"
+services --disabled="avahi-daemon.service,bluetooth.service"
 services --enabled="sshd.service,tmp.mount,fstrim.timer,dnf-automatic.timer,xe-linux-distribution.service,cloud-init.service,cloud-final.service,cloud-config.service,cloud-init-local.service,auditd.service"
 
 url --url https://repo.almalinux.org/almalinux/10/BaseOS/x86_64_v2/os/

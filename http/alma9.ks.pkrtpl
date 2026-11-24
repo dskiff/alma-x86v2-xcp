@@ -37,7 +37,7 @@ logvol /var/log/audit --vgname=vg0 --name=auditlogs --size=512  --fstype=xfs --f
 logvol /home          --vgname=vg0 --name=home      --size=2048 --fstype=xfs --fsoptions='nodev,nosuid,noatime'
 logvol swap           --vgname=vg0 --name=swap      --size=1024 --fstype=swap
 
-services --disabled="avahi-daemon.service,bluetooth.service,rhnsd.service,rhsmcertd.service"
+services --disabled="avahi-daemon.service,bluetooth.service"
 services --enabled="sshd.service,tmp.mount,fstrim.timer,dnf-automatic.timer,xe-linux-distribution.service,cloud-init.service,cloud-final.service,cloud-config.service,cloud-init-local.service,auditd.service"
 
 url --url https://repo.almalinux.org/almalinux/9/BaseOS/x86_64/os
