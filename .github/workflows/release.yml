@@ -325,30 +325,35 @@ jobs:
       BASE: ${{ needs.plan.outputs.base }}
       PRERELEASE: ${{ needs.plan.outputs.prerelease }}
     steps:
-      # The notes lead with why this release happened. The repository changes
-      # are GitHub's generated notes, counted from the latest full release so
-      # that pre-releases don't cut the range short.
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      # scripts/release-notes.sh writes the title and notes: why this release
+      # happened, the images, and each image's package changes since the
+      # previous full release, from the packages.txt in the evidence. Then the
+      # repository changes: GitHub's generated notes, counted from that same
+      # release so that pre-releases don't cut the range short.
       - name: Write release notes
         env:
           GH_TOKEN: ${{ github.token }}
           REASONS: ${{ needs.plan.outputs.reasons }}
         run: |
-          notes="${RUNNER_TEMP}/notes.md"
+          work="${RUNNER_TEMP}/notes"
+          mkdir -p "${work}/current" "${work}/previous"
+          gh release download "${TAG}" --dir "${work}/current" \
+            --pattern '*.evidence.tar.gz' --pattern '*.SHA256SUMS'
           args=(-f "tag_name=${TAG}")
           if [[ -n "${BASE}" ]]; then
+            gh release download "${BASE}" --dir "${work}/previous" --pattern '*.evidence.tar.gz'
             args+=(-f "previous_tag_name=${BASE}")
           fi
-          {
-            echo "## Why"
-            echo
-            while IFS= read -r reason; do
-              echo "- ${reason}"
-            done <<<"${REASONS}"
-            echo
-            gh api --method POST "repos/${GH_REPO}/releases/generate-notes" "${args[@]}" --jq .body
-          } >"${notes}"
-          cat "${notes}"
-          echo "NOTES=${notes}" >>"$GITHUB_ENV"
+          printf '%s\n' "${REASONS}" >"${work}/reasons.txt"
+          gh api --method POST "repos/${GH_REPO}/releases/generate-notes" "${args[@]}" \
+            --jq .body >"${work}/changes.md"
+          scripts/release-notes.sh "${work}"
+          cat "${work}/title" "${work}/notes.md"
 
       # "legacy" lets GitHub pick the latest release by creation date and
       # version, which agree in this scheme. Publishing marks itself latest by
@@ -358,11 +363,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          work="${RUNNER_TEMP}/notes"
           latest=legacy
           if [[ "${PRERELEASE}" == true ]]; then
             latest=false
           fi
           id="$(gh release view "${TAG}" --json databaseId --jq .databaseId)"
           gh api --method PATCH "repos/${GH_REPO}/releases/${id}" \
-            -F draft=false -f "make_latest=${latest}" -F "body=@${NOTES}" \
+            -F draft=false -f "make_latest=${latest}" \
+            -f "name=$(<"${work}/title")" -F "body=@${work}/notes.md" \
             --jq '"Published \(.html_url)"'
