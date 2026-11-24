@@ -121,6 +121,7 @@ jobs:
         env:
           PKR_VAR_accelerator: kvm
           PKR_VAR_memory: "4096"
+          PKR_VAR_release: ${{ env.TAG }}
         run: |
           (
             shopt -s nullglob
@@ -137,6 +138,13 @@ jobs:
       # ships zstd-compressed. Each image also gets a checksum file (for the
       # .vhd and the .vhd.zst) and a tarball of the rest of its build
       # directory: the build evidence and the serial log.
+      #
+      # Assets are named <image>-<AlmaLinux version>-<release>, such as
+      # alma9-9.9-v0.20261207.0.vhd.zst. The version is the one the image has
+      # installed, which comes from the floating repositories rather than the
+      # ISO: when the two differ, AlmaLinux has shipped a point release and the
+      # ISO needs bumping, so the build fails rather than ship an installer
+      # older than its packages.
       - name: Package
         id: package
         run: |
@@ -147,14 +155,29 @@ jobs:
             exit 1
           fi
           build_dir="${dirs[0]%/}"
-          name="${build_dir##*/}"
+          build_name="${build_dir##*/}"
+
+          installed="$(sed -nE 's/^VERSION_ID="?([0-9]+\.[0-9]+)"?$/\1/p' "${build_dir}/os-release")"
+          iso="$(sed -nE 's|^[[:space:]]*iso_url[[:space:]]*=.*/AlmaLinux-([0-9]+\.[0-9]+)-[^/"]*-boot\.iso".*$|\1|p' "${IMAGE}.pkr.hcl")"
+          if [[ ! "${installed}" =~ ^[0-9]+\.[0-9]+$ || "${installed}" != "${iso}" ]]; then
+            echo "::error::${IMAGE} installed AlmaLinux '${installed}' with the '${iso}' installer; bump the ISO in ${IMAGE}.pkr.hcl"
+            exit 1
+          fi
+
+          name="${IMAGE}-${installed}-${TAG}"
           dist="${RUNNER_TEMP}/dist"
           mkdir -p "${dist}"
 
-          zstd -T0 -12 -q -o "${dist}/${name}.vhd.zst" "${build_dir}/${name}.vhd"
-          cp "${build_dir}/SHA256SUMS" "${dist}/${name}.SHA256SUMS"
+          zstd -T0 -12 -q -o "${dist}/${name}.vhd.zst" "${build_dir}/${build_name}.vhd"
+          # The build's own digest of the .vhd, under the name it decompresses to.
+          read -r digest _ <"${build_dir}/SHA256SUMS"
+          if [[ ! "${digest}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::${build_dir}/SHA256SUMS doesn't start with a SHA-256 digest"
+            exit 1
+          fi
+          printf '%s  %s\n' "${digest}" "${name}.vhd" >"${dist}/${name}.SHA256SUMS"
           (cd "${dist}" && sha256sum "${name}.vhd.zst" >> "${name}.SHA256SUMS")
-          tar -C "${build_dir}" --exclude="${name}.vhd" --exclude="packer-${IMAGE}" \
+          tar -C "${build_dir}" --exclude="${build_name}.vhd" --exclude="packer-${IMAGE}" \
             -czf "${dist}/${name}.evidence.tar.gz" .
 
           for f in "${dist}"/*; do
@@ -166,14 +189,15 @@ jobs:
           ls -l "${dist}"
           echo "dist=${dist}" >> "$GITHUB_OUTPUT"
 
-      # A re-run builds the image again under a new name, so this image's
-      # assets from earlier runs are removed once the new ones are up.
+      # A re-run uploads the same names again, unless the AlmaLinux version
+      # changed in between, so this image's other assets are removed once the
+      # new ones are up.
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
           DIST: ${{ steps.package.outputs.dist }}
         run: |
-          prefix="alma_${IMAGE#alma}_"
+          prefix="${IMAGE}-"
           old="$(gh release view "${TAG}" --json assets \
             --jq ".assets[].name | select(startswith(\"${prefix}\"))")"
           gh release upload "${TAG}" "${DIST}"/* --clobber

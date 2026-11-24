@@ -22,6 +22,18 @@ variable "git_hash" {
   }
 }
 
+variable "release" {
+  type        = string
+  default     = "dev"
+  description = "Release version recorded in the image's /root/build_info.yaml, such as v0.20261207.0. The release workflow sets it; local builds keep dev."
+
+  validation {
+    # v0.<UTC date>.<patch>, optionally -pre.<n>: see scripts/release-version.sh.
+    condition     = can(regex("^(dev|v0\\.[1-9][0-9]{7}\\.(0|[1-9][0-9]*)(-pre\\.(0|[1-9][0-9]*))?)$", var.release))
+    error_message = "The release variable must be dev or a release version such as v0.20261207.0 or v0.20261207.1-pre.0."
+  }
+}
+
 variable "build_ssh_public_key" {
   type        = string
   description = "Public half of the throwaway key Packer logs in with. build.sh generates one per build and gives Packer the private half through an ssh-agent; scripts/seal.sh removes the key from the image."
