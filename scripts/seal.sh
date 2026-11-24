@@ -82,6 +82,7 @@ SOURCE_DATE_EPOCH="${newest_build}" update-ca-trust extract
 # every build (and which the truncate above already discarded). Rename them
 # to a fixed ID, the same for every build of this release. A clone's own
 # machine ID names the entries of kernels it installs later.
+# shellcheck source=/dev/null
 . /etc/os-release
 token=$(printf '%s' "${ID}-${VERSION_ID%%.*}-boot-entry" | sha256sum | cut -c1-32)
 for entry in /boot/loader/entries/*.conf; do
