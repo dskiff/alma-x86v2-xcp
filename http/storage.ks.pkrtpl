@@ -3,14 +3,18 @@
 # build's disk different, and every clone of an image shares its IDs anyway.
 # The IDs are derived from the image's name (${image}), so images don't share
 # them with each other.
-# Anaconda then installs onto these volumes as they are (--noformat). It has
-# no kickstart option for an LVM UUID, which is why it doesn't create them.
+# Anaconda then installs onto these volumes as they are (--noformat), except
+# /: it formats that itself, with the same fixed UUID (root_uuid, computed in
+# common.pkr.hcl as fsuuid below would). Its check that the packages fit
+# counts an existing filesystem's free space as nothing, so a --noformat /
+# always fails it. It has no kickstart option for an LVM UUID, which is why
+# %pre creates the volumes.
 ignoredisk --only-use=sda
 bootloader --timeout=3 --location=mbr --boot-drive=sda --append="console=tty0 console=ttyS0,115200n8 no_timer_check net.ifnames=0"
 
 part /boot --onpart=sda2 --noformat
 volgroup vg0 --noformat
-logvol /              --vgname=vg0 --name=root      --noformat --fsoptions='noatime'
+logvol /              --vgname=vg0 --name=root      --useexisting --fstype=xfs --mkfsoptions='-m uuid=${root_uuid}' --fsoptions='noatime'
 logvol /opt           --vgname=vg0 --name=opt       --noformat --fsoptions='nodev,noatime'
 logvol /var           --vgname=vg0 --name=var       --noformat --fsoptions='nodev,noatime'
 logvol /var/log       --vgname=vg0 --name=logs      --noformat --fsoptions='nodev,noexec,nosuid,noatime'
@@ -118,9 +122,9 @@ lvs -o lv_name,lv_uuid,lv_time,seg_start_pe,seg_size_pe vg0
 
 # Filesystems with fixed UUIDs. grub2-install embeds /boot's UUID in the
 # bootloader, and fstab and grub.cfg name it too, so it has to be fixed
-# before the install rather than changed after.
+# before the install rather than changed after. / is Anaconda's (see above).
 mkfs.xfs -f -L boot -m uuid="$(fsuuid boot)" "$${disk}2"
-for lv in root opt var logs auditlogs home; do
+for lv in opt var logs auditlogs home; do
   mkfs.xfs -f -m uuid="$(fsuuid "$${lv}")" "/dev/vg0/$${lv}"
 done
 mkswap -U "$(fsuuid swap)" /dev/vg0/swap
