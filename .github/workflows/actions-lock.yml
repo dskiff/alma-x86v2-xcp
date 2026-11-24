@@ -25,7 +25,7 @@ concurrency:
 jobs:
   verify:
     name: Verify
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read # check out this private repo
