@@ -14,6 +14,7 @@ selinux --enforcing
 network --bootproto=dhcp --onboot=on
 
 group --name=localssh --gid=770
+# Also cloud-init's default user: see 99_default_user.cfg in %post.
 user --name=ansible --gecos="ansible" --groups=wheel,localssh --uid 9001
 rootpw --lock
 
@@ -155,14 +156,31 @@ chage --lastday $(date --iso-8601) --mindays 7 --maxdays 999999999999 ansible
 # Allow sudo without password for ansible
 echo 'ansible ALL=(ALL) NOPASSWD: ALL' >/etc/sudoers.d/ansible
 
-# Stop cloud-init from creating its default user on each clone's first boot.
-# The stock cloud.cfg has "users: [default]", and the default user (almalinux
-# or cloud-user) gets passwordless sudo: a second root-equivalent account next
-# to ansible. cloud.cfg.d overrides cloud.cfg, later file names win, and lists
-# are replaced rather than merged. User-data can still create users.
-# scripts/check-cloud-init-users.sh checks the result.
-cat <<"EOF" >/etc/cloud/cloud.cfg.d/99_no_default_user.cfg
-users: []
+# Make ansible cloud-init's default user, in place of the stock one (almalinux
+# or cloud-user), which would be a second account with passwordless sudo. The
+# default user gets the SSH keys from the VM's metadata and from a top-level
+# ssh_authorized_keys in user-data. cloud.cfg.d overrides cloud.cfg, later file
+# names win, and user-data can't change system_info. A users list in user-data
+# replaces the one here, and keeps ansible as the default user only if it
+# includes "default".
+# The kickstart's user command creates ansible, rather than cloud-init on each
+# clone: the build logs in as it, and seal.sh exempts it from the CIS scan's
+# password aging, which a user that cloud-init creates later would get.
+# cloud-init only partly updates a user that already exists: it applies keys,
+# the password lock and sudo (repeating /etc/sudoers.d/ansible, which the
+# build needs), but not groups or shell, so those must match the user command.
+# scripts/check-cloud-init-users.sh checks that they do.
+cat <<"EOF" >/etc/cloud/cloud.cfg.d/99_default_user.cfg
+#cloud-config
+users: [default]
+system_info:
+  default_user:
+    name: ansible
+    gecos: ansible
+    groups: [wheel, localssh]
+    shell: /bin/bash
+    lock_passwd: true
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
 EOF
 
 # Install security updates automatically (dnf-automatic.timer is enabled above).
