@@ -4,7 +4,8 @@
 # Usage: sudo snapshot.sh <build dir> <out dir>
 #
 # <build dir> is a Packer output directory (output/alma_<N>_<id>/), with the
-# qcow2 disk, the .vhd, SHA256SUMS and the downloaded build evidence.
+# qcow2 disk, the .vhd, SHA256SUMS and the downloaded build evidence. The
+# snapshot is of the .vhd: the release asset, after scripts/finalize.sh.
 # <out dir> gets:
 #   files.sha256    digests of the build directory's files (disk, vhd, evidence)
 #   evidence/       a copy of the build evidence
@@ -30,9 +31,9 @@ out=$2
 here=$(cd "$(dirname "$0")" && pwd)
 
 shopt -s nullglob
-disks=("${build_dir}"/packer-alma*)
+disks=("${build_dir}"/*.vhd)
 if [[ ${#disks[@]} -ne 1 ]]; then
-  echo "ERROR: expected one packer-alma* disk in ${build_dir}, found ${#disks[@]}" >&2
+  echo "ERROR: expected one .vhd in ${build_dir}, found ${#disks[@]}" >&2
   exit 1
 fi
 disk=${disks[0]}

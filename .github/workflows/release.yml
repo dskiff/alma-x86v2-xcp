@@ -162,11 +162,11 @@ jobs:
           version: ${{ steps.version.outputs.packer }}
 
       # Ubuntu's QEMU rather than devbox's; the image doesn't depend on which
-      # QEMU builds it.
+      # QEMU builds it. LVM and xfsprogs are for scripts/normalize.sh.
       - name: Install QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils zstd
+          sudo apt-get install -y qemu-system-x86 qemu-utils zstd lvm2 xfsprogs
 
       # The runners support KVM, but /dev/kvm is root-only by default.
       - name: Enable KVM
@@ -202,6 +202,8 @@ jobs:
           PKR_VAR_accelerator: kvm
           PKR_VAR_memory: "4096"
           PKR_VAR_release: ${{ env.TAG }}
+          # scripts/finalize.sh: fail rather than ship a VHD it couldn't normalize.
+          FINALIZE_REQUIRE_NORMALIZE: "1"
         run: |
           (
             shopt -s nullglob

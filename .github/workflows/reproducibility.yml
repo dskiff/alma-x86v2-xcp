@@ -10,7 +10,10 @@ on:
   pull_request:
     paths:
       - ".github/workflows/reproducibility.yml"
-      - "scripts/repro/**"
+      - "*.pkr.hcl"
+      - "build.sh"
+      - "http/**"
+      - "scripts/**"
   workflow_dispatch:
 
 permissions: {}
@@ -57,7 +60,7 @@ jobs:
       - name: Install QEMU and tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils zstd lvm2 rsync
+          sudo apt-get install -y qemu-system-x86 qemu-utils zstd lvm2 xfsprogs rsync
 
       - name: Enable KVM
         run: |
@@ -93,7 +96,18 @@ jobs:
         env:
           PKR_VAR_accelerator: kvm
           PKR_VAR_memory: "4096"
-        run: PKR_VAR_cpus="$(nproc)" ./build.sh "${IMAGE}"
+          FINALIZE_REQUIRE_NORMALIZE: "1"
+        run: |
+          (
+            shopt -s nullglob
+            until logs=(output/"alma_${IMAGE#alma}"_*/serial.log); ((${#logs[@]})); do
+              sleep 5
+            done
+            tail -n +1 -F "${logs[0]}" 2>/dev/null | sed -u 's/^/serial| /'
+          ) &
+          watcher=$!
+          trap 'pkill -P "${watcher}" || true; kill "${watcher}" 2>/dev/null || true' EXIT
+          PKR_VAR_cpus="$(nproc)" ./build.sh "${IMAGE}"
 
       - name: Snapshot A
         run: |
@@ -105,7 +119,18 @@ jobs:
         env:
           PKR_VAR_accelerator: kvm
           PKR_VAR_memory: "4096"
-        run: PKR_VAR_cpus="$(nproc)" ./build.sh "${IMAGE}"
+          FINALIZE_REQUIRE_NORMALIZE: "1"
+        run: |
+          (
+            shopt -s nullglob
+            until logs=(output/"alma_${IMAGE#alma}"_*/serial.log); ((${#logs[@]})); do
+              sleep 5
+            done
+            tail -n +1 -F "${logs[0]}" 2>/dev/null | sed -u 's/^/serial| /'
+          ) &
+          watcher=$!
+          trap 'pkill -P "${watcher}" || true; kill "${watcher}" 2>/dev/null || true' EXIT
+          PKR_VAR_cpus="$(nproc)" ./build.sh "${IMAGE}"
 
       - name: Snapshot B
         run: |

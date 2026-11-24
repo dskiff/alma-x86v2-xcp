@@ -9,8 +9,14 @@ evidence=/tmp/build-evidence
 test -s "${evidence}/oscap_arf.xml"
 test -s "${evidence}/oscap_report.html"
 
-cp /root/build_info.yaml /root/anaconda-post.log "${evidence}/"
+cp /tmp/build_info.yaml /root/anaconda-post.log "${evidence}/"
 rpm -qa | sort >"${evidence}/packages.txt"
+# The newest installed package's build time. scripts/finalize.sh clamps every
+# later timestamp in the image to it, so timestamps depend on the packages,
+# not on when the image was built. Nothing installs packages after this
+# script: seal.sh only removes state.
+rpm -qa --qf '%{BUILDTIME}\n' | sort -n | tail -n 1 >"${evidence}/source_date_epoch"
+grep -Eqx '[1-9][0-9]+' "${evidence}/source_date_epoch"
 # The AlmaLinux version actually installed, which names the release assets. The
 # kickstart installs from the floating repositories, not the ISO, so this can
 # be newer than the ISO's version. (-L: /etc/os-release is a symlink.)

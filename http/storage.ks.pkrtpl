@@ -1,0 +1,115 @@
+# Disk layout, shared by every image. %pre below creates it, with the same
+# disk, filesystem and LVM IDs on every build: a random ID would make every
+# build's disk different, and every clone of an image shares its IDs anyway.
+# The IDs are derived from the image's name (${image}), so images don't share
+# them with each other.
+# Anaconda then installs onto these volumes as they are (--noformat). It has
+# no kickstart option for an LVM UUID, which is why it doesn't create them.
+ignoredisk --only-use=sda
+bootloader --timeout=3 --location=mbr --boot-drive=sda --append="console=tty0 console=ttyS0,115200n8 no_timer_check net.ifnames=0"
+
+part /boot --onpart=sda2 --noformat
+volgroup vg0 --useexisting --noformat
+logvol /              --vgname=vg0 --name=root      --useexisting --noformat --fsoptions='noatime'
+logvol /opt           --vgname=vg0 --name=opt       --useexisting --noformat --fsoptions='nodev,noatime'
+logvol /var           --vgname=vg0 --name=var       --useexisting --noformat --fsoptions='nodev,noatime'
+logvol /var/log       --vgname=vg0 --name=logs      --useexisting --noformat --fsoptions='nodev,noexec,nosuid,noatime'
+logvol /var/log/audit --vgname=vg0 --name=auditlogs --useexisting --noformat --fsoptions='nodev,noexec,nosuid,noatime'
+logvol /home          --vgname=vg0 --name=home      --useexisting --noformat --fsoptions='nodev,nosuid,noatime'
+logvol swap           --vgname=vg0 --name=swap      --useexisting --noformat
+
+%pre --erroronfail --log=/tmp/ks-pre-storage.log
+set -eux -o pipefail
+
+disk=/dev/sda
+
+# 32 hex digits from the image name and a purpose, so each ID is fixed.
+hexid() {
+  printf '%s' "${image}-$1" | sha256sum | cut -c1-32
+}
+# A UUID (shaped as version 4) for a filesystem or swap.
+fsuuid() {
+  local h
+  h=$(hexid "$1")
+  echo "$${h:0:8}-$${h:8:4}-4$${h:13:3}-8$${h:17:3}-$${h:20:12}"
+}
+# An LVM UUID: 32 characters in groups of 6-4-4-4-4-4-6.
+lvmuuid() {
+  local h
+  h=$(hexid "$1")
+  echo "$${h:0:6}-$${h:6:4}-$${h:10:4}-$${h:14:4}-$${h:18:4}-$${h:22:4}-$${h:26:6}"
+}
+
+# The installer may have activated LVM on a reused disk; Packer's is blank,
+# but don't rely on it.
+vgchange -an || true
+wipefs -a "$${disk}"
+
+# MBR with a fixed disk ID. The layout is what Anaconda made before: a 1 MiB
+# partition the MBR doesn't use, a 1 GiB /boot, and LVM on the rest.
+sfdisk --wipe always "$${disk}" <<EOF
+label: dos
+label-id: 0x$(hexid disk | cut -c1-8)
+start=2048, size=2048, type=83
+start=4096, size=2097152, type=83, bootable
+start=2101248, type=8e
+EOF
+udevadm settle
+
+# LVM: create the volumes in the order Anaconda allocated them, then rewrite
+# the metadata with fixed VG and LV UUIDs and creation times, and write it
+# to a freshly wiped PV so that no earlier copy of it (with random UUIDs)
+# stays in the metadata area.
+pv="$${disk}3"
+pvcreate -y -ff --uuid "$(lvmuuid pv)" --norestorefile "$${pv}"
+vgcreate -y vg0 "$${pv}"
+lvcreate -y -Wy -Zy -n swap -L 1024m vg0
+lvcreate -y -Wy -Zy -n home -L 2048m vg0
+lvcreate -y -Wy -Zy -n auditlogs -L 512m vg0
+lvcreate -y -Wy -Zy -n logs -L 512m vg0
+lvcreate -y -Wy -Zy -n var -L 4096m vg0
+lvcreate -y -Wy -Zy -n opt -L ${opt_mib}m vg0
+lvcreate -y -Wy -Zy -n root -L 2048m vg0
+vgcfgbackup -f /tmp/vg0.vg vg0
+vgchange -an vg0
+
+# Replace each section's id (the VG's, and each LV's) and every creation
+# time and host. A PV's id stays: pvcreate set it above.
+awk -v vg="$(lvmuuid vg)" '
+  function lvmuuid(name,   cmd, h) {
+    cmd = "printf %s \"${image}-lv-" name "\" | sha256sum | cut -c1-32"
+    cmd | getline h
+    close(cmd)
+    return substr(h, 1, 6) "-" substr(h, 7, 4) "-" substr(h, 11, 4) "-" substr(h, 15, 4) "-" substr(h, 19, 4) "-" substr(h, 23, 4) "-" substr(h, 27, 6)
+  }
+  /^[[:space:]]*[A-Za-z0-9_+.-]+ \{$/ { section = $1; depth++ }
+  /^[[:space:]]*\}$/ { depth-- }
+  /^[[:space:]]*id = "/ {
+    if (section == "vg0") { sub(/"[^"]*"/, "\"" vg "\"") }
+    else if (depth == 3 && parent == "logical_volumes") { sub(/"[^"]*"/, "\"" lvmuuid(section) "\"") }
+  }
+  /^[[:space:]]*(logical_volumes|physical_volumes) \{$/ { parent = $1 }
+  /creation_time = / { sub(/creation_time = [0-9]+/, "creation_time = 0") }
+  /creation_host = / { sub(/creation_host = "[^"]*"/, "creation_host = \"localhost\"") }
+  { print }
+' /tmp/vg0.vg >/tmp/vg0.fixed.vg
+cat /tmp/vg0.fixed.vg
+grep -q "id = \"$(lvmuuid vg)\"" /tmp/vg0.fixed.vg
+
+dd if=/dev/zero of="$${pv}" bs=1M count=1 conv=fsync
+pvcreate -y -ff --uuid "$(lvmuuid pv)" --restorefile /tmp/vg0.fixed.vg "$${pv}"
+vgcfgrestore -f /tmp/vg0.fixed.vg vg0
+vgchange -ay vg0
+udevadm settle
+lvs -o lv_name,lv_uuid,lv_time,seg_start_pe,seg_size_pe vg0
+
+# Filesystems with fixed UUIDs. grub2-install embeds /boot's UUID in the
+# bootloader, and fstab and grub.cfg name it too, so it has to be fixed
+# before the install rather than changed after.
+mkfs.xfs -f -L boot -m uuid="$(fsuuid boot)" "$${disk}2"
+for lv in root opt var logs auditlogs home; do
+  mkfs.xfs -f -m uuid="$(fsuuid "$${lv}")" "/dev/vg0/$${lv}"
+done
+mkswap -U "$(fsuuid swap)" /dev/vg0/swap
+blkid
+%end

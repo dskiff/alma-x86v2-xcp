@@ -18,24 +18,7 @@ group --name=localssh --gid=770
 user --name=ansible --gecos="ansible" --groups=wheel,localssh --uid 9001
 rootpw --lock
 
-# Disk partitioning
-ignoredisk --only-use=sda
-bootloader --timeout=3 --location=mbr --boot-drive=sda --append="console=tty0 console=ttyS0,115200n8 no_timer_check net.ifnames=0"
-clearpart --all --initlabel --drives=sda
-zerombr
-
-part biosboot --fstype=biosboot --size=1 --ondisk=sda
-part /boot    --fstype="xfs" --size=1024 --label=boot --asprimary --ondisk=sda
-part pv.01 --grow --asprimary --ondisk=sda
-
-volgroup vg0 pv.01
-logvol /              --vgname=vg0 --name=root      --size=2048 --fstype=xfs --fsoptions='noatime'
-logvol /opt           --vgname=vg0 --name=opt       --size=128  --fstype=xfs --fsoptions='nodev,noatime'
-logvol /var           --vgname=vg0 --name=var       --size=4096 --fstype=xfs --fsoptions='nodev,noatime'
-logvol /var/log       --vgname=vg0 --name=logs      --size=512  --fstype=xfs --fsoptions='nodev,noexec,nosuid,noatime'
-logvol /var/log/audit --vgname=vg0 --name=auditlogs --size=512  --fstype=xfs --fsoptions='nodev,noexec,nosuid,noatime'
-logvol /home          --vgname=vg0 --name=home      --size=2048 --fstype=xfs --fsoptions='nodev,nosuid,noatime'
-logvol swap           --vgname=vg0 --name=swap      --size=1024 --fstype=swap
+${storage}
 
 %addon com_redhat_kdump --disable
 %end
@@ -80,6 +63,9 @@ scap-security-guide
 aide
 audit
 policycoreutils
+
+# No kdump: it builds an initramfs of its own at every boot.
+-kexec-tools
 
 # unnecessary firmware
 -alsa-*
@@ -156,8 +142,11 @@ echo '${build_ssh_authorized_key}' >/home/ansible/.ssh/authorized_keys
 chmod 600 /home/ansible/.ssh/authorized_keys
 chown -R ansible:ansible /home/ansible/.ssh
 
-# Don't expire ansible password
-chage --lastday $(date --iso-8601) --mindays 7 --maxdays 999999999999 ansible
+# Don't expire ansible password. The day it was last changed is the newest
+# package's build day, not today, so that two builds of the same packages
+# write the same /etc/shadow.
+newest_build=$(rpm -qa --qf '%%{BUILDTIME}\n' | sort -n | tail -n 1)
+chage --lastday "$(date -u -d "@$${newest_build}" +%F)" --mindays 7 --maxdays 999999999999 ansible
 
 # Allow sudo without password for ansible
 echo 'ansible ALL=(ALL) NOPASSWD: ALL' >/etc/sudoers.d/ansible
