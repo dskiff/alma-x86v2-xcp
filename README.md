@@ -33,12 +33,30 @@ PKR_VAR_accelerator=kvm ./build.sh alma9   # on an x86 Linux host with /dev/kvm
 ## accounts
 
 The only login is `ansible`, with passwordless sudo. The image gives it no SSH
-keys and no password: install keys on first boot with cloud-init.
-SSH takes keys only, and users must members of the `localssh` group.
+keys and no password: install keys on first boot with cloud-init. `ansible` is
+cloud-init's default user, in place of the stock `almalinux` or `cloud-user`,
+so keys from the VM's metadata and top-level `ssh_authorized_keys` go to it:
 
-cloud-init's default user (`almalinux` or `cloud-user`) is turned off, so
-top-level `ssh_authorized_keys` in user-data, which would go to that user,
-don't give you a login.
+```yaml
+#cloud-config
+ssh_authorized_keys:
+  - ssh-ed25519 AAAA...
+```
+
+Naming `ansible` in a `users` list works too. But a `users` list replaces the
+default user: unless it includes `default`, keys from metadata or top-level
+`ssh_authorized_keys` go to no one.
+
+SSH takes keys only, and only from members of the `localssh` group, so other
+users you create need `groups: localssh`. They also get the CIS scan's password
+aging, even with no password: about a year after cloud-init creates one, SSH
+logins as it fail with "Password change required but no TTY available".
+`ansible` is exempt. To exempt another user, add to user-data:
+
+```yaml
+runcmd:
+  - chage -M -1 -I -1 alice
+```
 
 ## package sources
 
