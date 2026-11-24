@@ -1,0 +1,128 @@
+name: Packer
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  # verify-iso.sh checks the templates against AlmaLinux's live CHECKSUM files,
+  # which can change while the templates don't: a point release moves the
+  # previous ISO to vault.almalinux.org. The weekly run catches that before a
+  # release build does.
+  schedule:
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify-iso:
+    name: Verify ISO checksums
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out this private repo
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      # Renovate takes iso_checksum from the CHECKSUM file next to the ISO but
+      # never checks that file's signature. This does, against the AlmaLinux
+      # release keys pinned in verify-iso.sh, so an ISO bump only passes if
+      # AlmaLinux signed the digest it brings in.
+      - name: verify-iso.sh
+        run: ./verify-iso.sh
+
+  # Everything that can be checked without booting a VM. A mistake in a
+  # template or kickstart otherwise first shows up in a release build.
+  validate:
+    name: Validate
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out this private repo
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      # devbox.json is the single source of truth for tool versions (and is
+      # what Renovate bumps), so CI uses the same Packer as `devbox shell`.
+      - name: Read Packer version from devbox.json
+        id: version
+        run: |
+          version="$(jq -er '.packages[] | select(startswith("packer@")) | ltrimstr("packer@")' devbox.json)"
+          echo "packer=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@v3.4.0
+        with:
+          version: ${{ steps.version.outputs.packer }}
+
+      - name: packer fmt
+        run: packer fmt -check -recursive -diff .
+
+      # Plugin discovery hits the GitHub API; authenticate so the shared
+      # per-IP anonymous rate limit can't fail the job. Scoped to this step
+      # only.
+      - name: packer init
+        env:
+          PACKER_GITHUB_API_TOKEN: ${{ github.token }}
+        run: packer init .
+
+      # The variables build.sh passes. The key is a throwaway that only has to
+      # pass the templates' validation rules: nothing boots or logs in here.
+      - name: Write build variables
+        run: |
+          ssh-keygen -q -t ed25519 -N '' -C packer-ci -f "${RUNNER_TEMP}/id_ed25519"
+          {
+            echo "git_hash = \"${GITHUB_SHA}\""
+            echo "build_ssh_public_key = \"$(<"${RUNNER_TEMP}/id_ed25519.pub")\""
+          } >"${RUNNER_TEMP}/ci.pkrvars.hcl"
+
+      - name: packer validate
+        run: packer validate -var-file="${RUNNER_TEMP}/ci.pkrvars.hcl" .
+
+      # Versions are pinned in .github/ci-requirements.txt, which Renovate bumps.
+      - name: Install linters
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/venv"
+          "${RUNNER_TEMP}/venv/bin/pip" install --quiet --disable-pip-version-check \
+            -r .github/ci-requirements.txt
+
+      # Renders each kickstart with the templates' own locals, as the build
+      # serves it, and checks it with pykickstart (the parser Anaconda uses)
+      # against that release's syntax: alma9.ks as RHEL9, alma10.ks as RHEL10.
+      # In a build, a bad kickstart stops the install and Packer waits for SSH
+      # until the job times out.
+      - name: ksvalidator
+        run: |
+          shopt -s nullglob
+          templates=(http/alma*.ks.pkrtpl)
+          if (( ${#templates[@]} == 0 )); then
+            echo "::error::Found no kickstart templates in http/"
+            exit 1
+          fi
+          mkdir -p "${RUNNER_TEMP}/ks"
+          for tpl in "${templates[@]}"; do
+            name="${tpl##*/}"
+            name="${name%.pkrtpl}"
+            major="${name#alma}"
+            major="${major%.ks}"
+            out="${RUNNER_TEMP}/ks/${name}"
+            printf 'templatefile("%s", { build_ssh_authorized_key = local.build_ssh_authorized_key })\n' "${tpl}" \
+              | packer console -var-file="${RUNNER_TEMP}/ci.pkrvars.hcl" . >"${out}"
+            "${RUNNER_TEMP}/venv/bin/ksvalidator" -v "RHEL${major}" "${out}"
+          done
+
+      - name: shellcheck
+        run: git ls-files -z -- '*.sh' | xargs -0 "${RUNNER_TEMP}/venv/bin/shellcheck"

@@ -63,6 +63,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # A tag can point at a commit the Packer workflow never checked, so the
+      # ISO's checksum is checked against AlmaLinux's signature here too.
+      - name: Verify ISO checksum against AlmaLinux's signature
+        run: ./verify-iso.sh "${IMAGE}.pkr.hcl"
+
       # devbox.json is the single source of truth for tool versions (and is
       # what Renovate bumps), so CI uses the same Packer as `devbox shell`.
       - name: Read Packer version from devbox.json

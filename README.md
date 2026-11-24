@@ -30,6 +30,19 @@ They are released under MIT, though, and you may do whatever you like with them.
 PKR_VAR_accelerator=kvm ./build.sh alma9   # on an x86 Linux host with /dev/kvm
 ```
 
+## CI
+
+Every PR runs [`packer.yml`](.github/workflows/packer.yml), which boots no VM:
+
+- `verify-iso.sh` (see [boot ISO](#boot-iso))
+- `packer fmt -check` and `packer validate`
+- `ksvalidator` on each kickstart, rendered as the build renders it, against
+  that release's kickstart syntax
+- ShellCheck on every `*.sh`
+
+The images themselves are only built by [`release.yml`](.github/workflows/release.yml),
+when a `v*` tag is pushed.
+
 ## accounts
 
 The only login is `ansible`, with passwordless sudo. The image gives it no SSH

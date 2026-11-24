@@ -5,6 +5,9 @@ version: 'v0.0.3'
 workflows:
     '.github/workflows/actions-lock.yml':
         - 'actions/checkout@v7.0.1'
+    '.github/workflows/packer.yml':
+        - 'actions/checkout@v7.0.1'
+        - 'hashicorp/setup-packer@v3.4.0'
     '.github/workflows/release.yml':
         - 'actions/checkout@v7.0.1'
         - 'hashicorp/setup-packer@v3.4.0'
