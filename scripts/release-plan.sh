@@ -1,10 +1,11 @@
 #!/bin/bash
 # Decide whether this run of the release workflow releases, and why.
-# Usage: release-plan.sh < published-tags
+# Usage: release-plan.sh < published-releases
 #
-# stdin: the tags of the published, non-pre-release releases (any order; tags
-# outside the v0.<YYYYMMDD>.<patch> scheme are ignored). The latest of them is
-# the base every check compares against.
+# stdin: one line per published, non-pre-release release, "<tag> <published_at>"
+# (an ISO 8601 UTC time, as GitHub gives it; without one, the tag's date
+# stands in). Any order; tags outside the v0.<YYYYMMDD>.<patch> scheme are
+# ignored. The latest of them is the base every check compares against.
 #
 # Environment:
 #   RELEASE_EVENT   the workflow's event: schedule, push or workflow_dispatch
@@ -14,14 +15,21 @@
 #   GITHUB_OUTPUT   where the result goes (default: stdout)
 #
 # It releases when any of these holds:
-#   - scheduled: no release yet on or after the latest first or third Monday
-#     of a month. The workflow runs daily, so a Monday run that GitHub drops,
-#     or that fails, is retried the next day.
+#   - scheduled: no release published on or after the latest first or third
+#     Monday of a month. (Published, not tagged: a run planned before a Monday
+#     may finish after it.) The workflow runs daily, so a Monday run that
+#     GitHub drops, or that fails, is retried the next day.
 #   - a template's source ISO differs from the base's, by checksum: the same
 #     file at a new URL (such as after a move to vault) isn't a new ISO.
 #   - first: no release in this scheme exists yet.
 #   - manual: a manual run always releases. Off main, it makes a pre-release,
 #     and the other checks are skipped.
+#
+# The commit being released must descend from the base. A re-run keeps its
+# run's commit but plans again for today, so re-running an old run would
+# otherwise release old code under today's version. That fails the plan,
+# except on a push, where an older commit just means a later release already
+# covers it.
 #
 # Output: release, prerelease (true/false), date (YYYYMMDD), base (a tag, or
 # empty) and reasons (one per line). Needs the base's tag in the local clone.
@@ -94,10 +102,18 @@ else
   read -r next_monday _ <<<"$(release_mondays "${y}" $((m + 1)))"
 fi
 
-# The latest published release in this scheme.
-base=$(grep -E '^v0\.[1-9][0-9]{7}\.(0|[1-9][0-9]*)$' | sort -t. -k2,2n -k3,3n | tail -n 1 || true)
+# The latest published release in this scheme, and the UTC day it was
+# published.
+base_line=$(grep -E '^v0\.[1-9][0-9]{7}\.(0|[1-9][0-9]*)( |$)' | sort -t. -k2,2n -k3,3n | tail -n 1 || true)
+base=${base_line%% *}
+base_day=$(cut -d. -f2 <<<"${base}")
+published_re=' ([0-9]{4})-([0-9]{2})-([0-9]{2})T'
+if [[ "${base_line}" =~ ${published_re} ]]; then
+  base_day="${BASH_REMATCH[1]}${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
+fi
 
 reasons=""
+stale=""
 add_reason() {
   reasons+="${reasons:+$'\n'}$1"
 }
@@ -108,7 +124,7 @@ if [[ "${event}" == workflow_dispatch ]]; then
   reason=$(printf '%s' "${RELEASE_REASON:-}" | tr '\r\n\t' '   ' | sed -E 's/^ +//; s/ +$//')
   if [[ "${ref}" != refs/heads/main ]]; then
     prerelease=true
-    reason="${reason:-no reason given} (pre-release from ${ref#refs/heads/})"
+    reason="${reason:-no reason given} (pre-release from ${ref#refs/*/})"
   fi
   add_reason "Manual: ${reason:-no reason given}"
 fi
@@ -125,16 +141,22 @@ if [[ "${prerelease}" == true ]]; then
   : # A pre-release is for testing a branch; nothing else is a reason for it.
 elif [[ -z "${base}" ]]; then
   add_reason "First release in the v0.YYYYMMDD.N scheme"
+elif ! git rev-parse -q --verify "refs/tags/${base}^{commit}" >/dev/null; then
+  echo "ERROR: the latest release's tag, ${base}, isn't in this clone (fetch it with its history)" >&2
+  exit 1
+elif ! git merge-base --is-ancestor "refs/tags/${base}^{commit}" HEAD; then
+  head=$(git rev-parse --short HEAD)
+  if [[ "${event}" != push ]]; then
+    echo "ERROR: this run's commit, ${head}, doesn't descend from the latest release, ${base}." >&2
+    echo "A re-run of an old run would release old code under today's version; start a new run instead." >&2
+    exit 1
+  fi
+  stale="this run's commit, ${head}, is older than the latest release, ${base}, which covers it"
 else
-  base_date=$(cut -d. -f2 <<<"${base}")
-  if ((base_date < last_monday)); then
+  if ((base_day < last_monday)); then
     add_reason "Scheduled: $(describe_monday "${last_monday}")"
   fi
 
-  if ! git rev-parse -q --verify "refs/tags/${base}^{commit}" >/dev/null; then
-    echo "ERROR: the latest release's tag, ${base}, isn't in this clone (fetch it with its history)" >&2
-    exit 1
-  fi
   for template in *.pkr.hcl; do
     now=$(isos <"${template}")
     [[ -n "${now}" ]] || continue
@@ -159,8 +181,10 @@ if [[ -n "${reasons}" ]]; then
 fi
 
 {
-  echo "Base: ${base:-none}. Latest release Monday: ${last_monday}. Next: ${next_monday}."
-  if [[ "${release}" == true ]]; then
+  echo "Base: ${base:-none}${base:+, published ${base_day}}. Latest release Monday: ${last_monday}. Next: ${next_monday}."
+  if [[ -n "${stale}" ]]; then
+    echo "Nothing to release: ${stale}."
+  elif [[ "${release}" == true ]]; then
     echo "Releasing (pre-release: ${prerelease}):"
     while IFS= read -r line; do
       echo "  - ${line}"

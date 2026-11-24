@@ -67,8 +67,8 @@ jobs:
           # With tags: the plan reads the latest release's templates.
           fetch-depth: 0
 
-      # Published releases only: a failed attempt's tag or draft doesn't count
-      # as a release.
+      # Published releases only, with when each was published: a failed
+      # attempt's tag or draft doesn't count as a release.
       - name: Decide whether to release
         id: plan
         env:
@@ -78,7 +78,7 @@ jobs:
           RELEASE_REASON: ${{ inputs.reason }}
         run: |
           gh api --paginate "repos/${GH_REPO}/releases?per_page=100" \
-            --jq '.[] | select((.draft or .prerelease) | not) | .tag_name' \
+            --jq '.[] | select((.draft or .prerelease) | not) | "\(.tag_name) \(.published_at)"' \
             | scripts/release-plan.sh
 
   # The same checks as a PR, on the commit about to be released. Among them,
@@ -94,65 +94,35 @@ jobs:
     # documented for ./ paths; the $/ form zizmor suggests is for actions.
     uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
 
-  # The tag is created first, as the version's reservation: creating a tag that
-  # exists fails, so a version is never handed out twice. The images then
-  # upload to a draft, and the publish job releases it once every image is
-  # attached. "Re-run failed jobs" keeps this job's tag, so a re-run finishes
-  # the same draft.
+  # scripts/release-draft.sh tags the commit with the next version, which
+  # reserves it (creating a tag that exists fails), and creates the draft the
+  # images upload to; the publish job releases it once every image is attached.
+  # A re-run of this run reuses its draft, and drafts that failed runs left
+  # behind are deleted, so at most one unpublished draft is ever kept.
   draft:
     name: Draft release
     needs: [plan, ci]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
-      contents: write # create the tag and the draft release
+      contents: write # create the tag and the draft release, delete stale drafts
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
+      tag: ${{ steps.draft.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
-      # A name can also fail because it's burned: GitHub won't reuse the tag
-      # name of a deleted immutable release, and no longer lists it. So a
-      # failure moves on to the next version, a few times.
-      - name: Tag the next version
-        id: tag
+      - name: Find or create the draft release
+        id: draft
         env:
           GH_TOKEN: ${{ github.token }}
           DATE: ${{ needs.plan.outputs.date }}
           PRERELEASE: ${{ needs.plan.outputs.prerelease }}
           SHA: ${{ github.sha }}
-        run: |
-          taken="$(gh api --paginate "repos/${GH_REPO}/git/matching-refs/tags/v0.${DATE}." \
-            --jq '.[].ref | ltrimstr("refs/tags/")')"
-          for _ in 1 2 3 4 5; do
-            tag="$(scripts/release-version.sh "${DATE}" "${PRERELEASE}" <<<"${taken}")"
-            if gh api --method POST "repos/${GH_REPO}/git/refs" \
-              -f "ref=refs/tags/${tag}" -f "sha=${SHA}" >/dev/null; then
-              echo "Tagged ${SHA} as ${tag}"
-              echo "tag=${tag}" >>"$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "::warning::Couldn't create the tag ${tag}; trying the next version"
-            taken+=$'\n'"${tag}"
-          done
-          echo "::error::Couldn't create a tag for ${DATE}"
-          exit 1
-
-      - name: Create draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.tag.outputs.tag }}
-          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          flags=(--draft --verify-tag --title "${TAG}" --notes "Building in ${RUN_URL}")
-          if [[ "${PRERELEASE}" == true ]]; then
-            flags+=(--prerelease)
-          fi
-          gh release create "${TAG}" "${flags[@]}"
+        run: scripts/release-draft.sh
 
   images:
     name: Image (${{ matrix.image }})
