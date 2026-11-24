@@ -1,4 +1,4 @@
-# Linters for .github/workflows/packer.yml. Renovate bumps these pins.
+# Linters for .github/workflows/ci.yml. Renovate bumps these pins.
 # pykickstart's own dependency, requests, isn't pinned: pip installs its
 # newest release.
 pykickstart==3.78
