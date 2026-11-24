@@ -1,12 +1,9 @@
 name: Release
 
-# Pushing a v* tag (or creating a release in the GitHub UI, which pushes its
-# tag) builds the Packer images and attaches them to that tag's release.
 on:
   push:
     tags: ["v*"]
 
-# Deny everything by default; jobs opt in to what they need.
 permissions: {}
 
 concurrency:
@@ -48,8 +45,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     # Write access is for the upload step. Passing the images to a separate
-    # job would mean storing GBs as workflow artifacts, which quickly exhausts
-    # a private repo's artifact storage.
+    # job would mean storing GBs as workflow artifacts.
     permissions:
       contents: write # upload the images to the release
     strategy:

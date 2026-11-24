@@ -14,7 +14,6 @@ on:
     - cron: "23 7 * * 1"
   workflow_dispatch:
 
-# Deny everything by default; jobs opt in to what they need.
 permissions: {}
 
 concurrency:
