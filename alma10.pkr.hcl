@@ -82,6 +82,7 @@ build {
   provisioner "file" {
     content     = <<-YAML
 git_hash: "${var.git_hash}"
+release: "${var.release}"
 timestamp: "${local.timestamp}"
 source: "${source.name}"
 packer_version: "${packer.version}"
