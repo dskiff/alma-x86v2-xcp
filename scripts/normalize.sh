@@ -7,9 +7,9 @@
 # rsyslog its journal cursor, NetworkManager its lease and timestamps, and
 # the logs get the shutdown's own lines. Each of these differs between two
 # builds, and the random seed would be shared by every clone. This removes
-# them, then sets every timestamp later than <epoch> (the newest package's
-# build time) to <epoch>, so that files the install generated carry the
-# same times in every build. Files from packages keep their own times, which
+# them, sets the RPM database's install times to <epoch>, then sets every
+# timestamp later than <epoch> (the newest package's build time) to <epoch>,
+# so that files the install generated carry the same times in every build. Files from packages keep their own times, which
 # are all earlier.
 #
 # Finally it trims each filesystem, so freed blocks read as zeros.
@@ -22,6 +22,7 @@ if [[ $# -ne 2 || ! -f "$1" || ! "$2" =~ ^[1-9][0-9]+$ ]]; then
 fi
 raw=$1
 epoch=$2
+here=$(cd "$(dirname "$0")" && pwd)
 
 mnt=$(mktemp -d)
 loop=""
@@ -60,6 +61,16 @@ rewrite() {
 normalize_fs() {
   local name=$1 dev=$2
   mount -o nouuid "${dev}" "${mnt}"
+  # The RPM database records when each package was installed
+  # (scripts/rpmdb-times.py). It is on / on AlmaLinux 10, on /var on 9.
+  local rpmdb=""
+  case "${name}" in
+    root) rpmdb="${mnt}/usr/lib/sysimage/rpm/rpmdb.sqlite" ;;
+    var) rpmdb="${mnt}/lib/rpm/rpmdb.sqlite" ;;
+  esac
+  if [[ -n "${rpmdb}" && -f "${rpmdb}" && ! -L "${rpmdb}" ]]; then
+    python3 "${here}/rpmdb-times.py" "${rpmdb}" "${epoch}"
+  fi
   case "${name}" in
     var)
       rm -f "${mnt}/lib/systemd/random-seed" \
