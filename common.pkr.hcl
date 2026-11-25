@@ -47,6 +47,16 @@ variable "build_ssh_public_key" {
   }
 }
 
+variable "rpm_repo_url" {
+  type        = string
+  default     = ""
+  description = "Where the installer gets packages. build.sh sets it to the repository it serves of the locked packages (rpms/<image>.lock, see scripts/rpm-lock.py). Empty (RPM_LOCK=0 ./build.sh) installs from the floating repositories in rpms/<image>.repos instead, which is how the lockfile is made."
+  validation {
+    condition     = var.rpm_repo_url == "" || can(regex("^http://10\\.0\\.2\\.2:[0-9]+$", var.rpm_repo_url))
+    error_message = "The rpm_repo_url variable must be empty or http://10.0.2.2:<port>. Use ./build.sh, which sets it."
+  }
+}
+
 # Build VM settings. They don't change the image (the kickstarts fix the
 # partition sizes), so a builder can fit them to its host with PKR_VAR_*
 # environment variables. The defaults suit dev machines, including macOS.
@@ -85,9 +95,20 @@ locals {
   # Each image's kickstart, as the build serves it. The disk layout is shared
   # (http/storage.ks.pkrtpl): opt_mib is the one size that differs, since
   # AlmaLinux 10's mkfs.xfs won't make a filesystem under 300 MiB.
+  # rpms/<image>.repos: one "<name> <url>" line per repository.
+  rpm_repos = {
+    for image in ["alma9", "alma10"] : image => [
+      for line in split("\n", file("${path.root}/rpms/${image}.repos")) : regex("^(\\S+)\\s+(\\S+)$", trimspace(line))
+      if length(regexall("^\\w+\\s+https://\\S+$", trimspace(line))) > 0
+    ]
+  }
+
   kickstarts = {
     for image, opt_mib in { alma9 = 128, alma10 = 300 } : image => templatefile("${path.root}/http/${image}.ks.pkrtpl", {
       build_ssh_authorized_key = local.build_ssh_authorized_key
+      repos = var.rpm_repo_url != "" ? "url --url=${var.rpm_repo_url}/${image}/" : join("\n", [
+        for i, r in local.rpm_repos[image] : i == 0 ? "url --url=${r[1]}" : "repo --name=${r[0]} --baseurl=${r[1]}"
+      ])
       storage = templatefile("${path.root}/http/storage.ks.pkrtpl", {
         image   = image
         opt_mib = opt_mib

@@ -55,6 +55,41 @@ vars=(
   -var "build_ssh_public_key=${build_ssh_public_key}"
 )
 
+# Packages. A locked build (the default) installs exactly the packages
+# rpms/<image>.lock lists, from a repository of only those that this script
+# serves to the installer on the host's loopback. RPM_LOCK=0 installs from the
+# floating repositories in rpms/<image>.repos instead: that is how the
+# lockfile is made (scripts/rpm-lock.py lock), and the image isn't
+# reproducible.
+if [[ $# -eq 1 ]]; then images=("$1"); else images=(alma9 alma10); fi
+server=""
+port_file=""
+trap 'if [[ -n "${server}" ]]; then kill "${server}" 2>/dev/null; fi; rm -f "${port_file}"; ssh-agent -k >/dev/null' EXIT
+case "${RPM_LOCK:-1}" in
+  1)
+    rm -rf output/rpms
+    for image in "${images[@]}"; do
+      python3 scripts/rpm-lock.py fetch "${image}" "output/rpms/${image}"
+    done
+    port_file=$(mktemp)
+    rm -f "${port_file}"
+    python3 scripts/serve-rpms.py output/rpms "${port_file}" &
+    server=$!
+    until [[ -s "${port_file}" ]]; do
+      kill -0 "${server}" 2>/dev/null || { echo "ERROR: the package server didn't start" >&2; exit 1; }
+      sleep 0.2
+    done
+    vars+=(-var "rpm_repo_url=http://10.0.2.2:$(<"${port_file}")")
+    ;;
+  0)
+    echo "WARNING: RPM_LOCK=0: installing from the floating repositories in rpms/, not the lockfiles" >&2
+    ;;
+  *)
+    echo "ERROR: RPM_LOCK must be 1 (the default) or 0" >&2
+    exit 2
+    ;;
+esac
+
 set -x
 
 packer init .
