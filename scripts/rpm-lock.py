@@ -61,12 +61,14 @@ def get(url):
         time.sleep(2**attempt)
 
 
-def decompress(name, data):
-    if name.endswith(".gz"):
+def decompress(data):
+    """Metadata as served: gzip, xz, zstd or plain, whatever its name says
+    (some repositories' comps file is compressed under an .xml name)."""
+    if data.startswith(b"\x1f\x8b"):
         return gzip.decompress(data)
-    if name.endswith(".xz"):
+    if data.startswith(b"\xfd7zXZ\x00"):
         return lzma.decompress(data)
-    if name.endswith(".zst"):
+    if data.startswith(b"\x28\xb5\x2f\xfd"):
         return subprocess.run(["zstd", "-dc"], input=data, stdout=subprocess.PIPE, check=True).stdout
     return data
 
@@ -110,7 +112,7 @@ def primary(url, data):
     raw = get(url + loc)
     check(raw, kind, digest, url + loc)
     packages = {}
-    for _, elem in ET.iterparse(io.BytesIO(decompress(loc, raw))):
+    for _, elem in ET.iterparse(io.BytesIO(decompress(raw))):
         if elem.tag != "{%s}package" % COMMON_NS["c"]:
             continue
         name = elem.findtext("c:name", namespaces=COMMON_NS)
@@ -214,11 +216,15 @@ def cached(cache, url, digest):
 def merge_comps(paths, out):
     """Merge comps files as dnf does: a group in several gets every file's
     packages; anything else (categories, environments) is the first's."""
-    merged = ET.parse(paths[0]).getroot()
+    def root(path):
+        with open(path, "rb") as f:
+            return ET.fromstring(decompress(f.read()))
+
+    merged = root(paths[0])
     groups = {g.findtext("id"): g for g in merged.findall("group")}
     others = {(e.tag, e.findtext("id")) for e in merged if e.tag != "group"}
     for path in paths[1:]:
-        for elem in ET.parse(path).getroot():
+        for elem in root(path):
             if elem.tag != "group":
                 if (elem.tag, elem.findtext("id")) not in others:
                     others.add((elem.tag, elem.findtext("id")))
