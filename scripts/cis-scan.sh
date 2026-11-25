@@ -25,6 +25,9 @@ if [[ -n "${RPM_REPO_URL:-}" ]]; then
   mv /etc/yum.repos.d/*.repo "${aside}/"
   restore() {
     rm -f /etc/yum.repos.d/locked.repo
+    # dnf clean leaves the cache directory of a repository that is no longer
+    # configured, and its name derives from the URL, whose port changes.
+    rm -rf /var/cache/dnf/locked-*
     mv "${aside}"/*.repo /etc/yum.repos.d/
     rmdir "${aside}"
     dnf clean all
