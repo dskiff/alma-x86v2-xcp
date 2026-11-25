@@ -11,6 +11,12 @@ They are released under MIT, though, and you may do whatever you like with them.
 
 ## build
 
+You need Packer and QEMU (including `qemu-img`), plus `git`, `ssh-agent` and
+`ssh-keygen`. [devbox](https://www.jetify.com/devbox) installs the pinned
+Packer and QEMU from `devbox.json`: run `devbox shell`, or let direnv load it
+through `.envrc`. Builds work on macOS and Linux; on macOS they emulate the
+CPU, so expect them to be slow.
+
 ```bash
 # Build a specific image
 ./build.sh alma9
@@ -29,6 +35,14 @@ They are released under MIT, though, and you may do whatever you like with them.
 ```bash
 PKR_VAR_accelerator=kvm ./build.sh alma9   # on an x86 Linux host with /dev/kvm
 ```
+
+Each build writes `output/alma_<major>_<commit>_<timestamp>/`, holding the
+image as `<same name>.vhd` (the format XCP-ng imports), its `SHA256SUMS`, and
+`build-evidence/` (installed packages, the CIS scan report). Follow the
+install with `tail -f output/<build>/serial.log`.
+
+`build.sh` records the commit in the image, and marks the build `-dirty` if
+the working tree has uncommitted changes.
 
 ## accounts
 
@@ -58,6 +72,17 @@ runcmd:
   - chage -M -1 -I -1 alice
 ```
 
+## first boot
+
+cloud-init reads its configuration only from a local seed disk: a NoCloud disk
+labelled `cidata`, which is what Xen Orchestra attaches for a VM's cloud config,
+or a ConfigDrive (`config-2`). It doesn't probe cloud metadata services.
+
+The image is hardened with the CIS Server Level 1 profile at build time (the
+scan report ships in the build evidence). Security updates install
+automatically through `dnf-automatic`, without rebooting. The image ships
+without an AIDE database: run `aide --init` on each VM once it is configured.
+
 ## package sources
 
 | Image | Packages from |
@@ -80,6 +105,29 @@ goes up with each release that day. Each image is named after the AlmaLinux
 version it contains, `alma9-9.9-v0.20261207.0.vhd.zst`, with its checksums
 (`.SHA256SUMS`) and build evidence (`.evidence.tar.gz`) beside it. In a VM,
 `/root/build_info.yaml` records the release it was cloned from.
+
+## repository layout
+
+| Path | |
+|---|---|
+| `alma9.pkr.hcl`, `alma10.pkr.hcl` | Packer template for each image |
+| `common.pkr.hcl` | Plugin pin, variables and locals shared by both templates |
+| `http/*.ks.pkrtpl` | Kickstart for each image, rendered per build |
+| `scripts/check-*.sh` | Checks that run inside the build VM and fail the build |
+| `scripts/collect-evidence.sh`, `scripts/seal.sh` | Gather build records, then strip per-VM state before shutdown |
+| `scripts/release-*.sh` | Release planning, versioning, drafting and notes, run by `release.yml` |
+| `verify-iso.sh`, `keys/` | Check each template's ISO checksum against AlmaLinux's signed `CHECKSUM` |
+
+## CI
+
+Every pull request runs `verify-iso.sh`, `packer fmt` and `packer validate`,
+`ksvalidator` on the rendered kickstarts, and `shellcheck`. A pull request that
+changes a workflow also runs [zizmor](https://docs.zizmor.sh/), whose findings
+appear under code scanning, and checks the actions lockfile. Renovate bumps the ISOs and
+tool versions; `verify-iso.sh` is what makes an ISO bump trustworthy, since
+Renovate doesn't check signatures. Actions are pinned in
+`.github/workflows/actions.lock`; after changing a workflow's `uses:`, run
+`gh actions-lock` to update it.
 
 ## AI disclosure
 
