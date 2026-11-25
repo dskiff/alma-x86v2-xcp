@@ -97,20 +97,14 @@ YAML
     script          = "${path.root}/scripts/check-guest-agent.sh"
   }
 
+  # The CIS scan and remediation (see the script).
   provisioner "shell" {
-    inline = [<<-EOC
-set -eux -o pipefail
-sudo install -d -m 0755 /tmp/build-evidence
-sudo oscap xccdf eval \
-  --fetch-remote-resources \
-  --progress \
-  --remediate \
-  --results-arf /tmp/build-evidence/oscap_arf.xml \
-  --report /tmp/build-evidence/oscap_report.html \
-  --profile xccdf_org.ssgproject.content_profile_cis_server_l1 \
-  /usr/share/xml/scap/ssg/content/ssg-almalinux10-ds.xml < /dev/null || true
-EOC
+    execute_command = "{{ .Vars }} sudo -E bash '{{ .Path }}'"
+    environment_vars = [
+      "DATASTREAM=/usr/share/xml/scap/ssg/content/ssg-almalinux10-ds.xml",
+      "RPM_REPO_URL=${var.rpm_repo_url != "" ? "${var.rpm_repo_url}/alma10/" : ""}",
     ]
+    script = "${path.root}/scripts/cis-scan.sh"
   }
 
   # The CIS scan remounts /tmp noexec, so later scripts run via bash, not exec.

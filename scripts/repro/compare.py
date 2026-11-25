@@ -11,6 +11,7 @@ measurement, not a check.
 import difflib
 import json
 import os
+import re
 import sys
 from collections import Counter
 
@@ -204,8 +205,15 @@ def main() -> None:
     small_files(ev_a, os.path.join(b_dir, "evidence"), [n for n in names if not n.endswith((".xml", ".html"))])
     for n in names:
         if n.endswith((".xml", ".html")):
-            same = read(os.path.join(ev_a, n)) == read(os.path.join(b_dir, "evidence", n))
-            print(f"- `{n}`: {'identical' if same else '**differs** (not shown)'}")
+            a, b = read(os.path.join(ev_a, n)), read(os.path.join(b_dir, "evidence", n))
+            if a == b:
+                print(f"- `{n}`: identical")
+                continue
+            print(f"- `{n}`: **differs**")
+            # One tag per line, so a diff shows which elements differ.
+            def tags(s: str) -> str:
+                return re.sub(r">\s*<", ">\n<", s)
+            text_diff(tags(a), tags(b), n, limit=150)
 
     section("Filesystems")
     fss = sorted(set(os.listdir(os.path.join(a_dir, "manifest"))) | set(os.listdir(os.path.join(b_dir, "manifest"))))

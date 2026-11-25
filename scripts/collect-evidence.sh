@@ -17,8 +17,31 @@ rpm -qa | sort >"${evidence}/packages.txt"
 # script: seal.sh only removes state.
 rpm -qa --qf '%{BUILDTIME}\n' | sort -n | tail -n 1 >"${evidence}/source_date_epoch"
 grep -Eqx '[1-9][0-9]+' "${evidence}/source_date_epoch"
+
+# The scan results record when the scan ran: each rule result's time, the
+# start and end of the test, and the OVAL generators' timestamps. Set them to
+# the same build time, then render the report again from the results, so both
+# depend on what was scanned, not on when.
+scan_time=$(TZ=UTC date -d "@$(cat "${evidence}/source_date_epoch")" '+%Y-%m-%dT%H:%M:%S')
+sed -i -E \
+  -e "s/ (start-time|end-time|time|timestamp)=\"[^\"]*\"/ \1=\"${scan_time}\"/g" \
+  -e "s#<(([A-Za-z0-9_-]+:)?timestamp)>[^<]*</#<\1>${scan_time}</#g" \
+  "${evidence}/oscap_arf.xml"
+oscap xccdf generate report --output "${evidence}/oscap_report.html" "${evidence}/oscap_arf.xml"
+# The results still hold the remediations' own output (AIDE's database
+# digests, authselect's backup names, dnf's download speeds), which differs on
+# every build. Each rule's result alone, which two builds should share:
+python3 - "${evidence}/oscap_arf.xml" >"${evidence}/oscap_results.txt" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+ns = "{http://checklists.nist.gov/xccdf/1.2}"
+for r in ET.parse(sys.argv[1]).iter(ns + "rule-result"):
+    print(r.get("idref"), r.findtext(ns + "result"))
+PY
+test -s "${evidence}/oscap_results.txt"
 # The AlmaLinux version actually installed, which names the release assets. The
-# kickstart installs from the floating repositories, not the ISO, so this can
+# packages come from the repositories (locked or not), not the ISO, so this can
 # be newer than the ISO's version. (-L: /etc/os-release is a symlink.)
 cp -L /etc/os-release "${evidence}/os-release"
 
