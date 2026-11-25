@@ -52,8 +52,10 @@ def xattrs(path: str) -> dict:
         except OSError as e:
             result[name] = f"<error {e.errno}>"
             continue
+        # Lossless: text keeps any trailing NUL, and a prefix tells text
+        # from hex.
         try:
-            result[name] = value.decode("utf-8").rstrip("\0")
+            result[name] = "text:" + value.decode("utf-8")
         except UnicodeDecodeError:
             result[name] = "hex:" + value.hex()
     return result

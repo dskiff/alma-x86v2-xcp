@@ -36,6 +36,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Every image's volume group is vg0, and device-mapper names (vg0-root) are
+# global to the host, so two images can't be normalized at once (./build.sh
+# builds both in parallel). Wait for the other one; the lock is released when
+# this script exits, after the cleanup.
+exec 9>/run/lock/alma-x86v2-xcp-normalize.lock
+flock 9
+
 loop=$(losetup --find --show --partscan "${raw}")
 udevadm settle
 # --devices: the host's LVM may only scan devices in its own devices file.
@@ -63,8 +70,11 @@ normalize_fs() {
       ;;
     logs | auditlogs)
       # As seal.sh does: keep the files (their modes and labels), empty them,
-      # except the journal's, which journald would take for corrupt.
-      find "${mnt}" -type f -path "${mnt}/journal/*" -delete
+      # except the journal's, which journald would take for corrupt: remove
+      # those, with the directories named after the build VM's machine ID.
+      if [[ -d "${mnt}/journal" ]]; then
+        find "${mnt}/journal" -mindepth 1 -delete
+      fi
       find "${mnt}" -type f -exec truncate -s 0 {} +
       ;;
   esac
