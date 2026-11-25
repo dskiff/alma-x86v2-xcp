@@ -1,0 +1,7 @@
+# The repositories alma9's packages come from, in order of preference. An
+# unlocked build installs from these; scripts/rpm-lock.py lock resolves the
+# packages that build installed against them, into alma9.lock.
+baseos    https://repo.almalinux.org/almalinux/9/BaseOS/x86_64/os/
+appstream https://repo.almalinux.org/almalinux/9/AppStream/x86_64/os/
+crb       https://repo.almalinux.org/almalinux/9/CRB/x86_64/os/
+epel      https://dl.fedoraproject.org/pub/epel/9/Everything/x86_64/

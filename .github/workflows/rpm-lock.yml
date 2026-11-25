@@ -1,0 +1,148 @@
+name: RPM lock
+
+# Rewrites rpms/<image>.lock, the exact packages each image is built from
+# (see scripts/rpm-lock.py), and pushes it to the branch it ran on.
+#
+# Renovate opens a PR when a repository's metadata revision in a lockfile
+# changes. Renovate can't resolve RPM dependencies itself, so this workflow
+# does, on that PR: an unlocked build installs from the floating repositories
+# (rpms/<image>.repos), and the packages it installed become the new
+# lockfile. A locked build from that lockfile must then install exactly the
+# same packages before the lockfile is pushed. A commit pushed with the
+# workflow's token doesn't start other workflows, which is why the locked
+# build runs here.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/rpm-lock.yml"
+      - "rpms/**"
+      - "scripts/rpm-lock.py"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lock:
+    name: Lock (${{ matrix.image }})
+    # Only a branch of this repository can be pushed to.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    permissions:
+      contents: write # push the lockfile to the branch
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [alma9, alma10]
+    env:
+      IMAGE: ${{ matrix.image }}
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          # The last step pushes with these credentials. No step uploads the
+          # workspace.
+          persist-credentials: true # zizmor: ignore[artipacked]
+
+      # The same Packer, QEMU and KVM setup as release.yml.
+      - name: Read Packer version from devbox.json
+        id: version
+        run: |
+          version="$(jq -er '.packages[] | select(startswith("packer@")) | ltrimstr("packer@")' devbox.json)"
+          echo "packer=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@v3.4.0
+        with:
+          version: ${{ steps.version.outputs.packer }}
+
+      - name: Install QEMU and tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils zstd lvm2 xfsprogs createrepo-c
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle
+          if [[ ! -w /dev/kvm ]]; then
+            echo "::error::/dev/kvm isn't available on this runner"
+            exit 1
+          fi
+
+      - name: packer init
+        env:
+          PACKER_GITHUB_API_TOKEN: ${{ github.token }}
+        run: packer init .
+
+      - name: Unlocked build
+        env:
+          PKR_VAR_accelerator: kvm
+          PKR_VAR_memory: "4096"
+          RPM_LOCK: "0"
+        run: |
+          scripts/repro/watch-install.sh "${IMAGE}" &
+          watcher=$!
+          trap 'pkill -P "${watcher}" || true; kill "${watcher}" 2>/dev/null || true' EXIT
+          PKR_VAR_cpus="$(nproc)" ./build.sh "${IMAGE}"
+
+      - name: Write the lockfile
+        run: |
+          dirs=(output/alma_"${IMAGE#alma}"_*/)
+          cp "${dirs[0]}build-evidence/packages.txt" "${RUNNER_TEMP}/unlocked-packages.txt"
+          python3 scripts/rpm-lock.py lock "${IMAGE}" "${RUNNER_TEMP}/unlocked-packages.txt"
+          rm -rf output/alma_"${IMAGE#alma}"_*/
+          git diff --stat
+
+      - name: Locked build
+        env:
+          PKR_VAR_accelerator: kvm
+          PKR_VAR_memory: "4096"
+        run: |
+          scripts/repro/watch-install.sh "${IMAGE}" &
+          watcher=$!
+          trap 'pkill -P "${watcher}" || true; kill "${watcher}" 2>/dev/null || true' EXIT
+          PKR_VAR_cpus="$(nproc)" ./build.sh "${IMAGE}"
+
+      - name: Check the locked build installed the same packages
+        run: |
+          dirs=(output/alma_"${IMAGE#alma}"_*/)
+          if ! diff -u "${RUNNER_TEMP}/unlocked-packages.txt" "${dirs[0]}build-evidence/packages.txt"; then
+            echo "::error::The locked ${IMAGE} build installed different packages from the unlocked one"
+            exit 1
+          fi
+
+      # The two images' jobs push separately, so one may have to rebase onto
+      # the other's commit.
+      - name: Push the lockfile
+        run: |
+          if git diff --quiet -- "rpms/${IMAGE}.lock" && git ls-files --error-unmatch "rpms/${IMAGE}.lock" >/dev/null 2>&1; then
+            echo "rpms/${IMAGE}.lock is up to date"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "rpms/${IMAGE}.lock"
+          git commit -m "Update rpms/${IMAGE}.lock" -m "Written by the RPM lock workflow: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          for attempt in 1 2 3 4; do
+            if git push origin "HEAD:refs/heads/${BRANCH}"; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+            git pull --rebase origin "${BRANCH}"
+          done
+          exit 1

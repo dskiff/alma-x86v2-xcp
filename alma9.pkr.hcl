@@ -84,6 +84,7 @@ release: "${var.release}"
 timestamp: "${local.timestamp}"
 source: "${source.name}"
 packer_version: "${packer.version}"
+rpms: "${var.rpm_repo_url != "" ? "locked" : "unlocked"}"
 YAML
     destination = "/tmp/build_info.yaml"
   }

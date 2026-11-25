@@ -11,6 +11,14 @@
       "transformTemplates": [
         "{\"releases\": [releases.$match(version, /^SHA256 \\(AlmaLinux-(\\d+\\.\\d+)-\\w+-boot\\.iso\\) = ([0-9a-f]{64})$/).{\"version\": groups[0], \"digest\": groups[1]}]}"
       ]
+    },
+    "rpm-repomd": {
+      "description": "A yum repository's metadata revision, from its repodata/repomd.xml (the line '<revision>N</revision>'). It changes whenever the repository's packages do.",
+      "defaultRegistryUrlTemplate": "{{{packageName}}}repodata/repomd.xml",
+      "format": "plain",
+      "transformTemplates": [
+        "{\"releases\": [releases.$match(version, /^\\s*<revision>(\\d+)<\\/revision>\\s*$/).{\"version\": groups[0]}]}"
+      ]
     }
   },
   "customManagers": [
@@ -52,6 +60,28 @@
         "gh extension install (?<depName>github/gh-actions-lock) --pin (?<currentValue>v\\d+\\.\\d+\\.\\d+)"
       ],
       "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Notice when a repository in an RPM lockfile changes. Renovate only bumps the revision; .github/workflows/rpm-lock.yml then rewrites the lockfile on Renovate's PR (Renovate can't resolve RPM dependencies).",
+      "managerFilePatterns": [
+        "/^rpms/[^/]+\\.lock$/"
+      ],
+      "matchStrings": [
+        "(?:^|\\n)repo (?<depName>\\S+) (?<packageName>https://\\S+) (?<currentValue>\\d+)"
+      ],
+      "datasourceTemplate": "custom.rpm-repomd",
+      "versioningTemplate": "loose"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "One PR for every RPM repository change, since the lockfiles are rewritten whole.",
+      "matchDatasources": [
+        "custom.rpm-repomd"
+      ],
+      "groupName": "RPM repositories",
+      "separateMajorMinor": false
     }
   ]
 }

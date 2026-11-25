@@ -11,8 +11,9 @@ They are released under MIT, though, and you may do whatever you like with them.
 
 ## build
 
-You need Packer and QEMU (including `qemu-img`), plus `git`, `ssh-agent` and
-`ssh-keygen`. [devbox](https://www.jetify.com/devbox) installs the pinned
+You need Packer and QEMU (including `qemu-img`), plus `git`, `ssh-agent`,
+`ssh-keygen`, `python3` and `createrepo_c` (the `createrepo-c` package on
+Debian and Ubuntu, `createrepo_c` in Homebrew). [devbox](https://www.jetify.com/devbox) installs the pinned
 Packer and QEMU from `devbox.json`: run `devbox shell`, or let direnv load it
 through `.envrc`. Builds work on macOS and Linux; on macOS they emulate the
 CPU, so expect them to be slow.
@@ -31,6 +32,7 @@ CPU, so expect them to be slow.
 | `PKR_VAR_accelerator` | `tcg` | QEMU accelerator. `tcg` emulates the CPU in software, the only way macOS can run x86 guests. On an x86 Linux host, `kvm` is far faster |
 | `PKR_VAR_cpus` | `8` | vCPUs |
 | `PKR_VAR_memory` | `8192` | MiB |
+| `RPM_LOCK` | `1` | `0` installs from the floating repositories instead of the lockfiles; see [package sources](#package-sources) |
 
 ```bash
 PKR_VAR_accelerator=kvm ./build.sh alma9   # on an x86 Linux host with /dev/kvm
@@ -85,6 +87,25 @@ without an AIDE database: run `aide --init` on each VM once it is configured.
 
 ## package sources
 
+Each image installs exactly the packages its lockfile lists, `rpms/<image>.lock`:
+each RPM's path and SHA-256, from the repositories in `rpms/<image>.repos`.
+`build.sh` downloads them (cached in `~/.cache/alma-x86v2-xcp/rpms`), checks
+each digest, and serves the installer a repository of only those packages, so
+a build installs the same packages whatever the upstream repositories hold by
+then.
+
+Renovate opens a PR when a repository's metadata changes. On that PR, the RPM
+lock workflow (`.github/workflows/rpm-lock.yml`) builds each image from the
+floating repositories (`RPM_LOCK=0 ./build.sh`), writes the packages it
+installed into the lockfile (`scripts/rpm-lock.py lock`), checks that a build
+from the new lockfile installs the same packages, and pushes the lockfile to
+the PR. Merging that PR is what moves the images to newer packages.
+
+Upstream keeps old packages only for a while: AlmaLinux moves them to
+vault.almalinux.org at each point release, and EPEL drops a package's old
+version soon after an update. A lockfile that old no longer builds until
+Renovate's next PR updates it.
+
 | Image | Packages from |
 |---|---|
 | `alma9` | AlmaLinux 9 and Fedora's EPEL 9 |
@@ -96,7 +117,7 @@ Fedora Project, builds those packages.
 
 ## releases
 
-Each release rebuilds every image with the packages current that day. Releases
+Each release rebuilds every image from the lockfiles on `main`. Releases
 go out on the first and third Monday of each month, when a template moves to a
 new AlmaLinux point release, and by hand as needed, such as for a security fix.
 
@@ -113,7 +134,8 @@ Two builds of the same commit, from the same packages, should produce the same
 image. The disk, filesystem and LVM IDs are fixed (`http/storage.ks.pkrtpl`),
 `scripts/seal.sh` removes build-specific state from inside the VM, and
 `scripts/finalize.sh` removes what the VM writes while shutting down and sets
-every timestamp newer than the newest package's build time to that time. That
+every timestamp newer than the newest package's build time to that time. The
+packages come from the lockfiles (see [package sources](#package-sources)). That
 last step needs Linux and root, so local macOS builds skip it. The
 Reproducibility workflow builds each image twice and reports any difference.
 
@@ -124,6 +146,7 @@ Reproducibility workflow builds each image twice and reports any difference.
 | `alma9.pkr.hcl`, `alma10.pkr.hcl` | Packer template for each image |
 | `common.pkr.hcl` | Plugin pin, variables and locals shared by both templates |
 | `http/*.ks.pkrtpl` | Kickstart for each image, rendered per build |
+| `rpms/` | Each image's package repositories and lockfile; `scripts/rpm-lock.py` writes and fetches the lockfiles |
 | `scripts/check-*.sh` | Checks that run inside the build VM and fail the build |
 | `scripts/collect-evidence.sh`, `scripts/seal.sh` | Gather build records, then strip per-VM state before shutdown |
 | `scripts/release-*.sh` | Release planning, versioning, drafting and notes, run by `release.yml` |
@@ -135,7 +158,7 @@ Every pull request runs `verify-iso.sh`, `packer fmt` and `packer validate`,
 `ksvalidator` on the rendered kickstarts, and `shellcheck`. A pull request that
 changes a workflow also runs [zizmor](https://docs.zizmor.sh/), whose findings
 appear under code scanning, and checks the actions lockfile. Renovate bumps the ISOs and
-tool versions; `verify-iso.sh` is what makes an ISO bump trustworthy, since
+tool versions, and opens the PRs that update the RPM lockfiles; `verify-iso.sh` is what makes an ISO bump trustworthy, since
 Renovate doesn't check signatures. Actions are pinned in
 `.github/workflows/actions.lock`; after changing a workflow's `uses:`, run
 `gh actions-lock` to update it.
