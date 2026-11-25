@@ -81,7 +81,8 @@ labelled `cidata`, which is what Xen Orchestra attaches for a VM's cloud config,
 or a ConfigDrive (`config-2`). It doesn't probe cloud metadata services.
 
 The image is hardened with the CIS Server Level 1 profile at build time (the
-scan report ships in the build evidence). Security updates install
+scan report ships in the build evidence). The scan uses only the SCAP content of
+the locked `scap-security-guide` package and downloads nothing. Security updates install
 automatically through `dnf-automatic`, without rebooting. The image ships
 without an AIDE database: run `aide --init` on each VM once it is configured.
 

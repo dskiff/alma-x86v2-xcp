@@ -94,12 +94,15 @@ YAML
     script          = "${path.root}/scripts/check-guest-agent.sh"
   }
 
+  # The CIS scan evaluates only the SCAP content of the locked
+  # scap-security-guide package. It doesn't fetch the remote resources the
+  # data stream refers to (the vendor's security advisory OVAL feed, which
+  # changes daily): no rule of this profile reads them.
   provisioner "shell" {
     inline = [<<-EOC
 set -eux -o pipefail
 sudo install -d -m 0755 /tmp/build-evidence
 sudo oscap xccdf eval \
-  --fetch-remote-resources \
   --progress \
   --remediate \
   --results-arf /tmp/build-evidence/oscap_arf.xml \
