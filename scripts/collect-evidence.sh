@@ -28,6 +28,18 @@ sed -i -E \
   -e "s#<(([A-Za-z0-9_-]+:)?timestamp)>[^<]*</#<\1>${scan_time}</#g" \
   "${evidence}/oscap_arf.xml"
 oscap xccdf generate report --output "${evidence}/oscap_report.html" "${evidence}/oscap_arf.xml"
+# The results still hold the remediations' own output (AIDE's database
+# digests, authselect's backup names, dnf's download speeds), which differs on
+# every build. Each rule's result alone, which two builds should share:
+python3 - "${evidence}/oscap_arf.xml" >"${evidence}/oscap_results.txt" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+ns = "{http://checklists.nist.gov/xccdf/1.2}"
+for r in ET.parse(sys.argv[1]).iter(ns + "rule-result"):
+    print(r.get("idref"), r.findtext(ns + "result"))
+PY
+test -s "${evidence}/oscap_results.txt"
 # The AlmaLinux version actually installed, which names the release assets. The
 # packages come from the repositories (locked or not), not the ISO, so this can
 # be newer than the ISO's version. (-L: /etc/os-release is a symlink.)

@@ -82,7 +82,9 @@ or a ConfigDrive (`config-2`). It doesn't probe cloud metadata services.
 
 The image is hardened with the CIS Server Level 1 profile at build time (the
 scan report ships in the build evidence). The scan uses only the SCAP content of
-the locked `scap-security-guide` package and downloads nothing. Security updates install
+the locked `scap-security-guide` package and fetches no remote content, and the
+packages its remediations install come from the lockfile too
+(`scripts/cis-scan.sh`). `oscap_results.txt` lists each rule's result. Security updates install
 automatically through `dnf-automatic`, without rebooting. The image ships
 without an AIDE database: run `aide --init` on each VM once it is configured.
 
