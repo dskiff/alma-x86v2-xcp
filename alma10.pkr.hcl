@@ -15,9 +15,7 @@ source "qemu" "alma10" {
   # loopback.
   http_bind_address = "127.0.0.1"
   http_content = {
-    "/alma10.ks" = templatefile("${path.root}/http/alma10.ks.pkrtpl", {
-      build_ssh_authorized_key = local.build_ssh_authorized_key
-    })
+    "/alma10.ks" = local.kickstarts.alma10
   }
   # AlmaLinux 10 boot ISO uses GRUB2 (not isolinux like AL9).
   # Press 'e' to edit the default entry, navigate to the kernel line,
@@ -79,6 +77,9 @@ source "qemu" "alma10" {
 build {
   sources = ["source.qemu.alma10"]
 
+  # Build evidence only (scripts/collect-evidence.sh), not part of the image:
+  # a commit, release or time inside the image would make two builds of the
+  # same inputs differ.
   provisioner "file" {
     content     = <<-YAML
 git_hash: "${var.git_hash}"
@@ -88,15 +89,6 @@ source: "${source.name}"
 packer_version: "${packer.version}"
 YAML
     destination = "/tmp/build_info.yaml"
-  }
-
-  provisioner "shell" {
-    inline = [<<-EOC
-set -eux -o pipefail
-sudo install -m 600 /tmp/build_info.yaml /root/build_info.yaml
-sudo ls -l /root/build_info.yaml
-EOC
-    ]
   }
 
   provisioner "shell" {
@@ -154,13 +146,11 @@ EOC
     script          = "${path.root}/scripts/seal.sh"
   }
 
+  # scripts/finalize.sh turns the qcow2 into the VHD, after normalizing what
+  # the VM wrote while it shut down (see there), and writes SHA256SUMS.
   post-processor "shell-local" {
     inline = [
-      "cd output/alma_10_${local.build_id}",
-      # vpc => vhd
-      # see: https://docs.openstack.org/image-guide/convert-images.html
-      "qemu-img convert -O vpc packer-alma10 alma_10_${local.build_id}.vhd",
-      "{ sha256sum alma_10_${local.build_id}.vhd 2>/dev/null || shasum -a 256 alma_10_${local.build_id}.vhd; } > SHA256SUMS",
+      "${path.root}/scripts/finalize.sh output/alma_10_${local.build_id} alma10",
     ]
   }
 }

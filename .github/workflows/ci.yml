@@ -101,8 +101,8 @@ jobs:
           "${RUNNER_TEMP}/venv/bin/pip" install --quiet --disable-pip-version-check \
             -r .github/ci-requirements.txt
 
-      # Renders each kickstart with the templates' own locals, as the build
-      # serves it, and checks it with pykickstart (the parser Anaconda uses)
+      # Renders each kickstart as the build serves it (local.kickstarts), and
+      # checks it with pykickstart (the parser Anaconda uses)
       # against that release's syntax: alma9.ks as RHEL9, alma10.ks as RHEL10.
       # In a build, a bad kickstart stops the install and Packer waits for SSH
       # until the job times out.
@@ -121,7 +121,7 @@ jobs:
             major="${name#alma}"
             major="${major%.ks}"
             out="${RUNNER_TEMP}/ks/${name}"
-            printf 'templatefile("%s", { build_ssh_authorized_key = local.build_ssh_authorized_key })\n' "${tpl}" \
+            printf 'local.kickstarts["%s"]\n' "alma${major}" \
               | packer console -var-file="${RUNNER_TEMP}/ci.pkrvars.hcl" . >"${out}"
             "${RUNNER_TEMP}/venv/bin/ksvalidator" -v "RHEL${major}" "${out}"
           done

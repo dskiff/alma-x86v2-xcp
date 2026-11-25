@@ -103,8 +103,19 @@ new AlmaLinux point release, and by hand as needed, such as for a security fix.
 Releases are versioned `v0.<UTC date>.<n>`, such as `v0.20261207.0`; `n`
 goes up with each release that day. Each image is named after the AlmaLinux
 version it contains, `alma9-9.9-v0.20261207.0.vhd.zst`, with its checksums
-(`.SHA256SUMS`) and build evidence (`.evidence.tar.gz`) beside it. In a VM,
-`/root/build_info.yaml` records the release it was cloned from.
+(`.SHA256SUMS`) and build evidence (`.evidence.tar.gz`) beside it. The
+evidence's `build_info.yaml` records the commit and release; the image itself
+doesn't, so that two builds of the same inputs are the same image.
+
+## reproducibility
+
+Two builds of the same commit, from the same packages, should produce the same
+image. The disk, filesystem and LVM IDs are fixed (`http/storage.ks.pkrtpl`),
+`scripts/seal.sh` removes build-specific state from inside the VM, and
+`scripts/finalize.sh` removes what the VM writes while shutting down and sets
+every timestamp newer than the newest package's build time to that time. That
+last step needs Linux and root, so local macOS builds skip it. The
+Reproducibility workflow builds each image twice and reports any difference.
 
 ## repository layout
 

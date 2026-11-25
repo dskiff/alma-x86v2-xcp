@@ -1,0 +1,134 @@
+name: Reproducibility
+
+# Builds each image twice, back to back on the same runner, from the same
+# commit, and reports every difference between the two builds: the VHD, the
+# disk layout, each 4 KiB block, the build evidence, and every path in every
+# filesystem. See scripts/repro/. For now this measures; it doesn't fail on a
+# difference.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/reproducibility.yml"
+      - "*.pkr.hcl"
+      - "build.sh"
+      - "http/**"
+      - "scripts/**"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  compare:
+    name: Build twice (${{ matrix.image }})
+    runs-on: ubuntu-26.04
+    timeout-minutes: 150
+    permissions:
+      contents: read # check out this private repo
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [alma9, alma10]
+    env:
+      IMAGE: ${{ matrix.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      # The same Packer, QEMU and KVM setup as release.yml.
+      - name: Read Packer version from devbox.json
+        id: version
+        run: |
+          version="$(jq -er '.packages[] | select(startswith("packer@")) | ltrimstr("packer@")' devbox.json)"
+          echo "packer=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@v3.4.0
+        with:
+          version: ${{ steps.version.outputs.packer }}
+
+      - name: Install QEMU and tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils zstd lvm2 xfsprogs rsync
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle
+          if [[ ! -w /dev/kvm ]]; then
+            echo "::error::/dev/kvm isn't available on this runner"
+            exit 1
+          fi
+
+      - name: packer init
+        env:
+          PACKER_GITHUB_API_TOKEN: ${{ github.token }}
+        run: packer init .
+
+      # Snapshots hold two copies of each filesystem; put them on the runner's
+      # larger disk when it has one.
+      - name: Pick a work directory
+        run: |
+          work="${RUNNER_TEMP}/repro"
+          if [[ -d /mnt ]] && sudo mkdir -p /mnt/repro; then
+            work=/mnt/repro
+          fi
+          sudo mkdir -p "${work}"
+          sudo chown "$(id -u):$(id -g)" "${work}"
+          echo "WORK=${work}" >> "$GITHUB_ENV"
+          df -h / "${work}"
+
+      - name: Build A
+        env:
+          PKR_VAR_accelerator: kvm
+          PKR_VAR_memory: "4096"
+          FINALIZE_REQUIRE_NORMALIZE: "1"
+        run: |
+          scripts/repro/watch-install.sh "${IMAGE}" &
+          watcher=$!
+          trap 'pkill -P "${watcher}" || true; kill "${watcher}" 2>/dev/null || true' EXIT
+          PKR_VAR_cpus="$(nproc)" ./build.sh "${IMAGE}"
+
+      - name: Snapshot A
+        run: |
+          sudo TMPDIR="${WORK}" scripts/repro/snapshot.sh output/alma_"${IMAGE#alma}"_*/ "${WORK}/A"
+          rm -rf output/alma_"${IMAGE#alma}"_*/
+          df -h "${WORK}"
+
+      - name: Build B
+        env:
+          PKR_VAR_accelerator: kvm
+          PKR_VAR_memory: "4096"
+          FINALIZE_REQUIRE_NORMALIZE: "1"
+        run: |
+          scripts/repro/watch-install.sh "${IMAGE}" &
+          watcher=$!
+          trap 'pkill -P "${watcher}" || true; kill "${watcher}" 2>/dev/null || true' EXIT
+          PKR_VAR_cpus="$(nproc)" ./build.sh "${IMAGE}"
+
+      - name: Snapshot B
+        run: |
+          sudo TMPDIR="${WORK}" scripts/repro/snapshot.sh output/alma_"${IMAGE#alma}"_*/ "${WORK}/B"
+          df -h "${WORK}"
+
+      # The whole report goes to the log; the step summary gets as much as
+      # fits in its 1 MiB.
+      - name: Compare
+        run: |
+          sudo python3 scripts/repro/compare.py "${WORK}/A" "${WORK}/B" > "${RUNNER_TEMP}/report.md"
+          cat "${RUNNER_TEMP}/report.md"
+          head -c 1000000 "${RUNNER_TEMP}/report.md" >> "$GITHUB_STEP_SUMMARY"

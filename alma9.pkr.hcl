@@ -15,9 +15,7 @@ source "qemu" "alma9" {
   # loopback.
   http_bind_address = "127.0.0.1"
   http_content = {
-    "/alma9.ks" = templatefile("${path.root}/http/alma9.ks.pkrtpl", {
-      build_ssh_authorized_key = local.build_ssh_authorized_key
-    })
+    "/alma9.ks" = local.kickstarts.alma9
   }
   boot_command = [
     "<up><wait>",
@@ -76,6 +74,9 @@ source "qemu" "alma9" {
 build {
   sources = ["source.qemu.alma9"]
 
+  # Build evidence only (scripts/collect-evidence.sh), not part of the image:
+  # a commit, release or time inside the image would make two builds of the
+  # same inputs differ.
   provisioner "file" {
     content     = <<-YAML
 git_hash: "${var.git_hash}"
@@ -85,15 +86,6 @@ source: "${source.name}"
 packer_version: "${packer.version}"
 YAML
     destination = "/tmp/build_info.yaml"
-  }
-
-  provisioner "shell" {
-    inline = [<<-EOC
-set -eux -o pipefail
-sudo install -m 600 /tmp/build_info.yaml /root/build_info.yaml
-sudo ls -l /root/build_info.yaml
-EOC
-    ]
   }
 
   provisioner "shell" {
@@ -151,13 +143,11 @@ EOC
     script          = "${path.root}/scripts/seal.sh"
   }
 
+  # scripts/finalize.sh turns the qcow2 into the VHD, after normalizing what
+  # the VM wrote while it shut down (see there), and writes SHA256SUMS.
   post-processor "shell-local" {
     inline = [
-      "cd output/alma_9_${local.build_id}",
-      # vpc => vhd
-      # see: https://docs.openstack.org/image-guide/convert-images.html
-      "qemu-img convert -O vpc packer-alma9 alma_9_${local.build_id}.vhd",
-      "{ sha256sum alma_9_${local.build_id}.vhd 2>/dev/null || shasum -a 256 alma_9_${local.build_id}.vhd; } > SHA256SUMS",
+      "${path.root}/scripts/finalize.sh output/alma_9_${local.build_id} alma9",
     ]
   }
 }

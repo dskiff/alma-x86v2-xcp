@@ -25,7 +25,7 @@ variable "git_hash" {
 variable "release" {
   type        = string
   default     = "dev"
-  description = "Release version recorded in the image's /root/build_info.yaml, such as v0.20261207.0. The release workflow sets it; local builds keep dev."
+  description = "Release version recorded in the build evidence (build_info.yaml), such as v0.20261207.0. The release workflow sets it; local builds keep dev."
 
   validation {
     # v0.<UTC date>.<patch>, optionally -pre.<n>: see scripts/release-version.sh.
@@ -82,6 +82,25 @@ locals {
   # Packer's connection comes from through QEMU's user networking (the SSH port
   # is forwarded from the host's loopback), and only for a day, which covers
   # even a slow TCG build.
+  # Each image's kickstart, as the build serves it. The disk layout is shared
+  # (http/storage.ks.pkrtpl): opt_mib is the one size that differs, since
+  # AlmaLinux 10's mkfs.xfs won't make a filesystem under 300 MiB.
+  kickstarts = {
+    for image, opt_mib in { alma9 = 128, alma10 = 300 } : image => templatefile("${path.root}/http/${image}.ks.pkrtpl", {
+      build_ssh_authorized_key = local.build_ssh_authorized_key
+      storage = templatefile("${path.root}/http/storage.ks.pkrtpl", {
+        image   = image
+        opt_mib = opt_mib
+        # fsuuid root, as http/storage.ks.pkrtpl's %pre computes it.
+        root_uuid = join("-", [
+          substr(sha256("${image}-root"), 0, 8), substr(sha256("${image}-root"), 8, 4),
+          "4${substr(sha256("${image}-root"), 13, 3)}", "8${substr(sha256("${image}-root"), 17, 3)}",
+          substr(sha256("${image}-root"), 20, 12),
+        ])
+      })
+    })
+  }
+
   build_ssh_authorized_key = join(" ", [
     format("from=\"10.0.2.2\",expiry-time=\"%s\"", formatdate("YYYYMMDDhhmm'Z'", timeadd(timestamp(), "24h"))),
     trimspace(var.build_ssh_public_key),
