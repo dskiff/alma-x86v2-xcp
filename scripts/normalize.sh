@@ -43,6 +43,8 @@ trap cleanup EXIT
 # this script exits, after the cleanup.
 exec 9>/run/lock/alma-x86v2-xcp-normalize.lock
 flock 9
+# LVM's commands would warn about the lock's descriptor.
+export LVM_SUPPRESS_FD_WARNINGS=1
 
 loop=$(losetup --find --show --partscan "${raw}")
 udevadm settle

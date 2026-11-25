@@ -4,7 +4,7 @@
   rpm-lock.py lock <image> <packages.txt>
       Resolve every package an unlocked build installed (the build evidence's
       packages.txt, `rpm -qa`) against rpms/<image>.repos, and write
-      rpms/<image>.lock: each repository's metadata revision, its comps file
+      rpms/<image>.lock: each repository's metadata revision and comps file
       and each RPM's path and SHA-256.
 
   rpm-lock.py fetch <image> <dir>
@@ -142,23 +142,25 @@ def lock(image, packages_txt):
         "# rpm   <repo> <path> <sha256> <size>",
     ]
     found = {}
-    comps = None
+    comps = []
     for name, url in repos:
         revision, data = repomd(url)
         lines.append(f"repo {name} {url} {revision}")
-        if comps is None and "group" in data:
+        # Every repository's: Anaconda merges them, and AppStream's adds
+        # packages to BaseOS's groups (@core).
+        if "group" in data:
             loc, kind, digest = data["group"]
             if kind != "sha256":
                 die(f"{url}: comps has a {kind} checksum, not sha256")
-            comps = f"comps {name} {loc} {digest}"
+            comps.append(f"comps {name} {loc} {digest}")
         for nvra, (href, digest, size) in primary(url, data).items():
             found.setdefault(nvra, (name, href, digest, size))
-    if comps is None:
+    if not comps:
         die("no repository has a comps (group) file")
     missing = [p for p in wanted if p not in found]
     if missing:
         die("not in any repository: " + ", ".join(missing))
-    lines.append(comps)
+    lines.extend(comps)
     for p in wanted:
         name, href, digest, size = found[p]
         lines.append(f"rpm {name} {href} {digest} {size}")
@@ -172,7 +174,7 @@ def read_lock(image):
     path = os.path.join(ROOT, "rpms", f"{image}.lock")
     if not os.path.exists(path):
         die(f"{path} doesn't exist: run an unlocked build (RPM_LOCK=0 ./build.sh {image}) and rpm-lock.py lock")
-    repos, comps, rpms = {}, None, []
+    repos, comps, rpms = {}, [], []
     with open(path) as f:
         for n, line in enumerate(f, 1):
             fields = line.split()
@@ -181,15 +183,15 @@ def read_lock(image):
             if fields[0] == "repo" and len(fields) == 4:
                 repos[fields[1]] = fields[2]
             elif fields[0] == "comps" and len(fields) == 4:
-                comps = fields[1:]
+                comps.append(fields[1:])
             elif fields[0] == "rpm" and len(fields) == 5:
                 rpms.append(fields[1:4])
             else:
                 die(f"{path}:{n}: can't parse {line.strip()!r}")
-    for repo, *_ in ([comps] if comps else []) + rpms:
+    for repo, *_ in comps + rpms:
         if repo not in repos:
             die(f"{path}: no repo line for {repo}")
-    if comps is None or not rpms:
+    if not comps or not rpms:
         die(f"{path} has no comps or no rpm lines")
     return repos, comps, rpms
 
@@ -207,6 +209,35 @@ def cached(cache, url, digest):
         f.write(data)
     os.replace(tmp, path)
     return path
+
+
+def merge_comps(paths, out):
+    """Merge comps files as dnf does: a group in several gets every file's
+    packages; anything else (categories, environments) is the first's."""
+    merged = ET.parse(paths[0]).getroot()
+    groups = {g.findtext("id"): g for g in merged.findall("group")}
+    others = {(e.tag, e.findtext("id")) for e in merged if e.tag != "group"}
+    for path in paths[1:]:
+        for elem in ET.parse(path).getroot():
+            if elem.tag != "group":
+                if (elem.tag, elem.findtext("id")) not in others:
+                    others.add((elem.tag, elem.findtext("id")))
+                    merged.append(elem)
+                continue
+            gid = elem.findtext("id")
+            if gid not in groups:
+                groups[gid] = elem
+                merged.append(elem)
+                continue
+            mine = groups[gid].find("packagelist")
+            if mine is None:
+                mine = ET.SubElement(groups[gid], "packagelist")
+            have = {p.text for p in mine}
+            for req in elem.findall("packagelist/packagereq"):
+                if req.text not in have:
+                    have.add(req.text)
+                    mine.append(req)
+    ET.ElementTree(merged).write(out, encoding="utf-8", xml_declaration=True)
 
 
 def fetch(image, out):
@@ -228,8 +259,7 @@ def fetch(image, out):
     with concurrent.futures.ThreadPoolExecutor(8) as pool:
         for future in concurrent.futures.as_completed([pool.submit(one, e) for e in rpms]):
             future.result()
-    repo, href, digest = comps
-    shutil.copyfile(cached(cache, repos[repo] + href, digest), os.path.join(out, "comps.xml"))
+    merge_comps([cached(cache, repos[r] + h, d) for r, h, d in comps], os.path.join(out, "comps.xml"))
     out = os.path.abspath(out)
     subprocess.run(["createrepo_c", "--quiet", "--groupfile", os.path.join(out, "comps.xml"), out], check=True)
     print(f"{out}: {len(rpms)} locked packages for {image}")
